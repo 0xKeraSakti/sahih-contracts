@@ -4,4 +4,8 @@ lib/
 node_modules/
 broadcast/
 .env
-docs/
+.env.*
+!.env.example
+
+Thumbs.db
+.DS_Store

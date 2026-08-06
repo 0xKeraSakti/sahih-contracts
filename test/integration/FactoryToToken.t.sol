@@ -7,6 +7,9 @@ import { IssuerToken } from "../../src/IssuerToken.sol";
 import { IIssuerToken } from "../../src/interfaces/IIssuerToken.sol";
 import { DeployHelpers } from "../helpers/DeployHelpers.sol";
 
+/// @title FactoryToTokenTest
+/// @author Sahih Contracts
+/// @notice Integration tests covering tokens deployed by the Factory through their IssuerToken interface
 contract FactoryToTokenTest is Test, DeployHelpers {
     Factory internal factory;
     address internal tokenImplementation;
@@ -15,10 +18,12 @@ contract FactoryToTokenTest is Test, DeployHelpers {
     address internal operator = makeAddr("operator");
     address internal investorA = makeAddr("investorA");
 
+    /// @notice Deploys a fresh Factory and token implementation before each test
     function setUp() public {
         (factory, tokenImplementation) = deployFactory(admin, operator);
     }
 
+    /// @notice A proxy deployed by the Factory is fully usable through the IIssuerToken interface
     function test_ProxyDeployedByFactoryIsUsableThroughInterface() public {
         vm.prank(operator);
         (address contractAddress,) = factory.createIssuerToken(defaultFactoryParams());
@@ -38,6 +43,7 @@ contract FactoryToTokenTest is Test, DeployHelpers {
         assertEq(token.remainingSupply(), MAX_SUPPLY - 500);
     }
 
+    /// @notice The operator role configured on the Factory carries over consistently to the deployed token
     function test_OperatorRoleFromFactoryIsConsistentOnDeployedToken() public {
         vm.prank(operator);
         (address contractAddress,) = factory.createIssuerToken(defaultFactoryParams());
@@ -52,6 +58,7 @@ contract FactoryToTokenTest is Test, DeployHelpers {
         assertTrue(token.hasRole(token.ADMIN_ROLE(), admin));
     }
 
+    /// @notice Rotating the Factory's configured token roles applies to the next issuer token deployment
     function test_RotatedTokenRolesApplyToNextDeployment() public {
         address newOperator = makeAddr("newOperator");
         Factory.CreateIssuerTokenParams memory second = defaultFactoryParams();
@@ -68,6 +75,7 @@ contract FactoryToTokenTest is Test, DeployHelpers {
         assertFalse(token.hasRole(token.OPERATOR_ROLE(), operator));
     }
 
+    /// @notice Each issuer deployed by the Factory has fully isolated token state
     function test_EachIssuerGetsIsolatedTokenState() public {
         Factory.CreateIssuerTokenParams memory second = defaultFactoryParams();
         second.issuerId = ISSUER_ID_SECOND;

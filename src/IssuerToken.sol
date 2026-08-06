@@ -7,19 +7,32 @@ import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils
 import { IIssuerToken } from "./interfaces/IIssuerToken.sol";
 import { PeriodLib } from "./libraries/PeriodLib.sol";
 
+/// @title IssuerToken
+/// @author Sahih Contracts
+/// @notice ERC20 token representing an issuer's tradable profit-sharing units
 contract IssuerToken is IIssuerToken, ERC20Upgradeable, AccessControlUpgradeable, UUPSUpgradeable {
     using PeriodLib for string;
 
+    /// @notice Role allowed to update transfer restrictions and the whitelist
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+    /// @notice Role allowed to purchase tokens on behalf of an investor
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
+    /// @notice Maximum allowed profit sharing ratio, in basis points
     uint256 public constant MAX_PROFIT_SHARING_RATIO = 10_000;
 
+    /// @notice Identifier of the issuer this token represents
     string public issuerId;
+    /// @notice Share of profit distributed to holders, in basis points
     uint256 public profitSharingRatio;
+    /// @notice Price per unit at issuance
     uint256 public pricePerUnit;
+    /// @notice Period identifier distributions are paid against
     string public distributionPeriod;
+    /// @notice Whether transfers are restricted to whitelisted recipients
     bool public transferRestricted;
+    /// @notice Whether an address is allowed to receive tokens when transfers are restricted
     mapping(address => bool) public transferWhitelist;
+    /// @notice Maximum total supply that can be minted
     uint256 public maxSupply;
 
     uint256[50] private __gap;
@@ -35,11 +48,16 @@ contract IssuerToken is IIssuerToken, ERC20Upgradeable, AccessControlUpgradeable
     error SupplyExceeded(uint256 requested, uint256 remaining);
     error TransferRestricted();
 
+    /// @notice Disables initializers on the implementation contract
     constructor() {
         _disableInitializers();
     }
 
-    function initialize(InitParams calldata params) external initializer {
+    /// @notice Initializes the token, setting terms and granting roles
+    /// @param params Issuer terms, token metadata, and role addresses
+    function initialize(
+        InitParams calldata params
+    ) external initializer {
         if (params.issuerId.isEmpty()) {
             revert EmptyIssuerId();
         }
@@ -77,7 +95,15 @@ contract IssuerToken is IIssuerToken, ERC20Upgradeable, AccessControlUpgradeable
         transferRestricted = params.transferRestricted;
     }
 
-    function purchaseTokens(address investorAddress, uint256 amount, string calldata paymentSource) external {
+    /// @notice Mints tokens to an investor in exchange for an off-chain payment
+    /// @param investorAddress Address to receive the minted tokens
+    /// @param amount Amount of tokens to mint
+    /// @param paymentSource Reference to the off-chain payment source
+    function purchaseTokens(
+        address investorAddress,
+        uint256 amount,
+        string calldata paymentSource
+    ) external {
         if (investorAddress == address(0)) {
             revert ZeroAddress();
         }
@@ -98,7 +124,13 @@ contract IssuerToken is IIssuerToken, ERC20Upgradeable, AccessControlUpgradeable
         emit Purchase(investorAddress, amount, paymentSource, block.timestamp);
     }
 
-    function setTransferWhitelist(address account, bool allowed) external onlyRole(ADMIN_ROLE) {
+    /// @notice Updates whether an account may receive tokens while transfers are restricted
+    /// @param account Address to update
+    /// @param allowed Whether the account is whitelisted
+    function setTransferWhitelist(
+        address account,
+        bool allowed
+    ) external onlyRole(ADMIN_ROLE) {
         if (account == address(0)) {
             revert ZeroAddress();
         }
@@ -107,12 +139,18 @@ contract IssuerToken is IIssuerToken, ERC20Upgradeable, AccessControlUpgradeable
         emit TransferWhitelistUpdated(account, allowed);
     }
 
-    function setTransferRestricted(bool restricted) external onlyRole(ADMIN_ROLE) {
+    /// @notice Updates whether transfers are restricted to whitelisted recipients
+    /// @param restricted New transfer restriction state
+    function setTransferRestricted(
+        bool restricted
+    ) external onlyRole(ADMIN_ROLE) {
         transferRestricted = restricted;
 
         emit TransferRestrictionUpdated(restricted);
     }
 
+    /// @notice Returns the current issuer terms
+    /// @return Current profit sharing ratio, supply, price, distribution period, and transfer restriction
     function getIssuerTerms() external view returns (IssuerTerms memory) {
         return IssuerTerms({
             profitSharingRatio: profitSharingRatio,
@@ -123,17 +161,32 @@ contract IssuerToken is IIssuerToken, ERC20Upgradeable, AccessControlUpgradeable
         });
     }
 
+    /// @notice Returns the amount of supply remaining to be minted
+    /// @return Remaining mintable supply
     function remainingSupply() external view returns (uint256) {
         return maxSupply - totalSupply();
     }
 
-    function _update(address from, address to, uint256 value) internal override {
+    /// @notice Enforces the transfer whitelist when transfers are restricted
+    /// @param from Address tokens are transferred from
+    /// @param to Address tokens are transferred to
+    /// @param value Amount of tokens transferred
+    function _update(
+        address from,
+        address to,
+        uint256 value
+    ) internal override {
         if (transferRestricted && from != address(0) && to != address(0) && !transferWhitelist[to]) {
             revert TransferRestricted();
         }
         super._update(from, to, value);
     }
 
-    // solhint-disable-next-line no-empty-blocks
-    function _authorizeUpgrade(address newImplementation) internal override onlyRole(ADMIN_ROLE) { }
+    // solhint-disable no-empty-blocks
+    /// @notice Authorizes a UUPS upgrade; restricted to the admin role
+    /// @param newImplementation Address of the new implementation contract
+    function _authorizeUpgrade(
+        address newImplementation
+    ) internal override onlyRole(ADMIN_ROLE) { }
+    // solhint-enable no-empty-blocks
 }

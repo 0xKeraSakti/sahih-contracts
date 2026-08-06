@@ -13,6 +13,9 @@ import { IssuerTokenV2 } from "../mocks/IssuerTokenV2.sol";
 import { MockToken } from "../mocks/MockToken.sol";
 import { DeployHelpers } from "../helpers/DeployHelpers.sol";
 
+/// @title UpgradeFlowTest
+/// @author Sahih Contracts
+/// @notice Integration tests covering UUPS upgrade flows for IssuerToken and Distribution
 contract UpgradeFlowTest is Test, DeployHelpers {
     Factory internal factory;
     Distribution internal distribution;
@@ -24,6 +27,7 @@ contract UpgradeFlowTest is Test, DeployHelpers {
     address internal investorA = makeAddr("investorA");
     address internal investorB = makeAddr("investorB");
 
+    /// @notice Deploys Factory and Distribution, creates an issuer token, funds it, and records a prior distribution before each test
     function setUp() public {
         (factory,) = deployFactory(admin, operator);
         (distribution, paymentToken) = deployDistribution(admin, operator);
@@ -44,6 +48,7 @@ contract UpgradeFlowTest is Test, DeployHelpers {
         distribution.recordDistribution(address(token), PERIOD_W32, holders, 425_000, CALCULATION_REF_HASH);
     }
 
+    /// @notice All existing IssuerToken state is preserved after upgrading to the V2 implementation
     function test_TokenStatePreservedAfterUpgrade() public {
         address newImplementation = address(new IssuerTokenV2());
 
@@ -55,7 +60,7 @@ contract UpgradeFlowTest is Test, DeployHelpers {
         assertEq(upgraded.issuerId(), ISSUER_ID);
         assertEq(upgraded.balanceOf(investorA), 300);
         assertEq(upgraded.balanceOf(investorB), 700);
-        assertEq(upgraded.totalSupply(), 1_000);
+        assertEq(upgraded.totalSupply(), 1000);
         assertEq(upgraded.maxSupply(), MAX_SUPPLY);
         assertEq(upgraded.pricePerUnit(), PRICE_PER_UNIT);
         assertEq(upgraded.profitSharingRatio(), PROFIT_SHARING_RATIO);
@@ -64,6 +69,7 @@ contract UpgradeFlowTest is Test, DeployHelpers {
         assertTrue(upgraded.hasRole(upgraded.OPERATOR_ROLE(), operator));
     }
 
+    /// @notice New functions introduced by the V2 implementation are usable after the upgrade
     function test_NewFunctionUsableAfterUpgrade() public {
         address newImplementation = address(new IssuerTokenV2());
 
@@ -79,6 +85,7 @@ contract UpgradeFlowTest is Test, DeployHelpers {
         assertEq(upgraded.VERSION(), "v2");
     }
 
+    /// @notice Pre-existing behavior such as transfer restrictions and purchasing still works correctly after the upgrade
     function test_ExistingBehaviorStillEnforcedAfterUpgrade() public {
         address newImplementation = address(new IssuerTokenV2());
 
@@ -88,7 +95,8 @@ contract UpgradeFlowTest is Test, DeployHelpers {
         IssuerTokenV2 upgraded = IssuerTokenV2(address(token));
 
         vm.prank(investorA);
-        vm.expectRevert(IssuerTokenV2.TransferRestricted.selector);
+        vm.expectRevert(IssuerToken.TransferRestricted.selector);
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         upgraded.transfer(investorB, 10);
 
         vm.prank(investorA);
@@ -96,6 +104,7 @@ contract UpgradeFlowTest is Test, DeployHelpers {
         assertEq(upgraded.balanceOf(investorA), 400);
     }
 
+    /// @notice Reverts when initialize is called again on the token after it has been upgraded
     function test_RevertWhen_InitializeCalledAfterUpgrade() public {
         address newImplementation = address(new IssuerTokenV2());
 
@@ -108,26 +117,26 @@ contract UpgradeFlowTest is Test, DeployHelpers {
         IssuerTokenV2(address(token)).initialize(params);
     }
 
+    /// @notice Reverts when an operator, rather than an admin, attempts to upgrade the token
     function test_RevertWhen_OperatorUpgradesToken() public {
         address newImplementation = address(new IssuerTokenV2());
+        bytes32 adminRole = token.ADMIN_ROLE();
 
         vm.prank(operator);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector, operator, token.ADMIN_ROLE()
-            )
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, operator, adminRole)
         );
         token.upgradeToAndCall(newImplementation, "");
     }
 
+    /// @notice All existing Distribution state is preserved after upgrading the Distribution implementation
     function test_DistributionStatePreservedAfterUpgrade() public {
         address newImplementation = address(new Distribution());
 
         vm.prank(admin);
         distribution.upgradeToAndCall(newImplementation, "");
 
-        IDistribution.DistributionRecord memory record =
-            distribution.getDistributionRecord(address(token), PERIOD_W32);
+        IDistribution.DistributionRecord memory record = distribution.getDistributionRecord(address(token), PERIOD_W32);
 
         assertEq(record.totalAmount, 425_000);
         assertTrue(record.recorded);

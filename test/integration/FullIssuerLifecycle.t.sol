@@ -12,6 +12,9 @@ import { MockEAS } from "../mocks/MockEAS.sol";
 import { MockToken } from "../mocks/MockToken.sol";
 import { DeployHelpers } from "../helpers/DeployHelpers.sol";
 
+/// @title FullIssuerLifecycleTest
+/// @author Sahih Contracts
+/// @notice Integration tests covering the full issuer lifecycle across Factory, Distribution, and Attester
 contract FullIssuerLifecycleTest is Test, DeployHelpers {
     Factory internal factory;
     Distribution internal distribution;
@@ -28,6 +31,7 @@ contract FullIssuerLifecycleTest is Test, DeployHelpers {
     address internal investorA = makeAddr("investorA");
     address internal investorB = makeAddr("investorB");
 
+    /// @notice Deploys fresh Factory, Distribution, and Attester contracts and funds Distribution before each test
     function setUp() public {
         (factory,) = deployFactory(admin, operator);
         (distribution, paymentToken) = deployDistribution(admin, operator);
@@ -37,6 +41,7 @@ contract FullIssuerLifecycleTest is Test, DeployHelpers {
         vm.warp(1_754_179_200);
     }
 
+    /// @notice A full issuer lifecycle from verification attestation through investor distribution succeeds end to end
     function test_LifecycleFromVerificationToDistribution() public {
         bytes32 verificationW31 = _attestVerification(PERIOD_W31, AVG_REVENUE);
         bytes32 scoreW31 = _attestScore(PERIOD_W31, RISK_SCORE);
@@ -57,8 +62,8 @@ contract FullIssuerLifecycleTest is Test, DeployHelpers {
         vm.prank(investorB);
         token.purchaseTokens(investorB, 700, "qris");
 
-        assertEq(token.totalSupply(), 1_000);
-        assertEq(token.remainingSupply(), MAX_SUPPLY - 1_000);
+        assertEq(token.totalSupply(), 1000);
+        assertEq(token.remainingSupply(), MAX_SUPPLY - 1000);
 
         vm.warp(block.timestamp + 7 days);
 
@@ -103,6 +108,7 @@ contract FullIssuerLifecycleTest is Test, DeployHelpers {
         assertEq(history[0].period, PERIOD_W32);
     }
 
+    /// @notice A zero-revenue distribution period still leaves a recorded on-chain trace
     function test_LowRevenuePeriodStillLeavesOnChainTrace() public {
         vm.prank(operator);
         (address contractAddress,) = factory.createIssuerToken(defaultFactoryParams());
@@ -115,15 +121,21 @@ contract FullIssuerLifecycleTest is Test, DeployHelpers {
         vm.prank(operator);
         distribution.recordDistribution(contractAddress, PERIOD_W32, holders, 0, CALCULATION_REF_HASH);
 
-        IDistribution.DistributionRecord memory record =
-            distribution.getDistributionRecord(contractAddress, PERIOD_W32);
+        IDistribution.DistributionRecord memory record = distribution.getDistributionRecord(contractAddress, PERIOD_W32);
 
         assertTrue(record.recorded);
         assertEq(record.totalAmount, 0);
         assertEq(paymentToken.balanceOf(investorA), 0);
     }
 
-    function _attestVerification(string memory period, uint256 avgRevenue) private returns (bytes32) {
+    /// @notice Records a verification attestation for the shared test issuer with the given period and revenue
+    /// @param period The reporting period label
+    /// @param avgRevenue The average revenue value to attest
+    /// @return The UID of the recorded verification attestation
+    function _attestVerification(
+        string memory period,
+        uint256 avgRevenue
+    ) private returns (bytes32) {
         vm.prank(operator);
         return attester.attestVerification(
             IAttester.VerificationPayload({
@@ -137,7 +149,14 @@ contract FullIssuerLifecycleTest is Test, DeployHelpers {
         );
     }
 
-    function _attestScore(string memory period, uint256 score) private returns (bytes32) {
+    /// @notice Records a score attestation for the shared test issuer with the given period and score
+    /// @param period The reporting period label
+    /// @param score The risk score value to attest
+    /// @return The UID of the recorded score attestation
+    function _attestScore(
+        string memory period,
+        uint256 score
+    ) private returns (bytes32) {
         vm.prank(operator);
         return attester.attestScore(
             IAttester.ScorePayload({

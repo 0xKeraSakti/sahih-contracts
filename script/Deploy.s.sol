@@ -16,12 +16,7 @@ contract Deploy is Script {
 
     function run()
         external
-        returns (
-            address tokenImplementation,
-            address factory,
-            address distributionProxy,
-            address attesterProxy
-        )
+        returns (address tokenImplementation, address factory, address distributionProxy, address attesterProxy)
     {
         address admin = _envAddress("ADMIN_ADDRESS");
         address operator = _envAddress("OPERATOR_ADDRESS");
@@ -40,8 +35,7 @@ contract Deploy is Script {
         address distributionImplementation = address(new Distribution());
         distributionProxy = address(
             new ERC1967Proxy(
-                distributionImplementation,
-                abi.encodeCall(IDistribution.initialize, (paymentToken, admin, operator))
+                distributionImplementation, abi.encodeCall(IDistribution.initialize, (paymentToken, admin, operator))
             )
         );
 
@@ -50,8 +44,7 @@ contract Deploy is Script {
             new ERC1967Proxy(
                 attesterImplementation,
                 abi.encodeCall(
-                    IAttester.initialize,
-                    (eas, verificationSchema, scoreSchema, distributionSchema, admin, operator)
+                    IAttester.initialize, (eas, verificationSchema, scoreSchema, distributionSchema, admin, operator)
                 )
             )
         );
@@ -64,7 +57,9 @@ contract Deploy is Script {
         console2.log("attesterProxy", attesterProxy);
     }
 
-    function _envAddress(string memory name) private view returns (address value) {
+    function _envAddress(
+        string memory name
+    ) private view returns (address value) {
         value = vm.envAddress(name);
         if (value == address(0)) {
             revert MissingEnvAddress(name);

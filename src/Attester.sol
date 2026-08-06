@@ -6,13 +6,22 @@ import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils
 import { IAttester } from "./interfaces/IAttester.sol";
 import { IEAS, AttestationRequest, AttestationRequestData, EASAttestation } from "./interfaces/IEAS.sol";
 
+/// @title Attester
+/// @author Sahih Contracts
+/// @notice Records verification, score, and distribution attestations via EAS
 contract Attester is IAttester, AccessControlUpgradeable, UUPSUpgradeable {
+    /// @notice Role allowed to update schemas and the EAS address
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+    /// @notice Role allowed to submit attestations
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
 
+    /// @notice The Ethereum Attestation Service contract used to record attestations
     IEAS public eas;
+    /// @notice Schema UID used for verification attestations
     bytes32 public verificationSchema;
+    /// @notice Schema UID used for score attestations
     bytes32 public scoreSchema;
+    /// @notice Schema UID used for distribution attestations
     bytes32 public distributionSchema;
 
     uint256[50] private __gap;
@@ -22,10 +31,18 @@ contract Attester is IAttester, AccessControlUpgradeable, UUPSUpgradeable {
     error SchemaMismatch(bytes32 expected, bytes32 actual);
     error AttestationNotFound(bytes32 attestationUID);
 
+    /// @notice Disables initializers on the implementation contract
     constructor() {
         _disableInitializers();
     }
 
+    /// @notice Initializes the contract, setting the EAS address, schemas, and roles
+    /// @param eas_ Address of the Ethereum Attestation Service contract
+    /// @param verificationSchema_ Schema UID used for verification attestations
+    /// @param scoreSchema_ Schema UID used for score attestations
+    /// @param distributionSchema_ Schema UID used for distribution attestations
+    /// @param admin Address granted the default admin and admin roles
+    /// @param operator Address granted the operator role
     function initialize(
         address eas_,
         bytes32 verificationSchema_,
@@ -56,11 +73,12 @@ contract Attester is IAttester, AccessControlUpgradeable, UUPSUpgradeable {
         emit SchemasUpdated(verificationSchema_, scoreSchema_, distributionSchema_);
     }
 
-    function attestVerification(VerificationPayload calldata payload)
-        external
-        onlyRole(OPERATOR_ROLE)
-        returns (bytes32 attestationUID)
-    {
+    /// @notice Records a verification attestation for an issuer
+    /// @param payload Verification data to encode and attest
+    /// @return attestationUID UID of the created attestation
+    function attestVerification(
+        VerificationPayload calldata payload
+    ) external onlyRole(OPERATOR_ROLE) returns (bytes32 attestationUID) {
         bytes memory data = abi.encode(
             payload.issuerId,
             payload.period,
@@ -74,11 +92,12 @@ contract Attester is IAttester, AccessControlUpgradeable, UUPSUpgradeable {
         emit VerificationAttested(payload.issuerId, payload.period, attestationUID);
     }
 
-    function attestScore(ScorePayload calldata payload)
-        external
-        onlyRole(OPERATOR_ROLE)
-        returns (bytes32 attestationUID)
-    {
+    /// @notice Records a score attestation for an issuer
+    /// @param payload Score data to encode and attest
+    /// @return attestationUID UID of the created attestation
+    function attestScore(
+        ScorePayload calldata payload
+    ) external onlyRole(OPERATOR_ROLE) returns (bytes32 attestationUID) {
         bytes memory data = abi.encode(
             payload.issuerId, payload.score, payload.scoringMethodVersion, payload.period, payload.timestamp
         );
@@ -87,11 +106,12 @@ contract Attester is IAttester, AccessControlUpgradeable, UUPSUpgradeable {
         emit ScoreAttested(payload.issuerId, payload.period, attestationUID);
     }
 
-    function attestDistribution(DistributionPayload calldata payload)
-        external
-        onlyRole(OPERATOR_ROLE)
-        returns (bytes32 attestationUID)
-    {
+    /// @notice Records a distribution attestation for an issuer
+    /// @param payload Distribution data to encode and attest
+    /// @return attestationUID UID of the created attestation
+    function attestDistribution(
+        DistributionPayload calldata payload
+    ) external onlyRole(OPERATOR_ROLE) returns (bytes32 attestationUID) {
         bytes memory data = abi.encode(
             payload.issuerId, payload.period, payload.totalAmount, payload.calculationRefHash, payload.timestamp
         );
@@ -100,10 +120,15 @@ contract Attester is IAttester, AccessControlUpgradeable, UUPSUpgradeable {
         emit DistributionAttested(payload.issuerId, payload.period, attestationUID);
     }
 
-    function setSchemas(bytes32 verificationSchema_, bytes32 scoreSchema_, bytes32 distributionSchema_)
-        external
-        onlyRole(ADMIN_ROLE)
-    {
+    /// @notice Updates the verification, score, and distribution schema UIDs
+    /// @param verificationSchema_ New schema UID for verification attestations
+    /// @param scoreSchema_ New schema UID for score attestations
+    /// @param distributionSchema_ New schema UID for distribution attestations
+    function setSchemas(
+        bytes32 verificationSchema_,
+        bytes32 scoreSchema_,
+        bytes32 distributionSchema_
+    ) external onlyRole(ADMIN_ROLE) {
         verificationSchema = verificationSchema_;
         scoreSchema = scoreSchema_;
         distributionSchema = distributionSchema_;
@@ -111,7 +136,11 @@ contract Attester is IAttester, AccessControlUpgradeable, UUPSUpgradeable {
         emit SchemasUpdated(verificationSchema_, scoreSchema_, distributionSchema_);
     }
 
-    function setEAS(address eas_) external onlyRole(ADMIN_ROLE) {
+    /// @notice Updates the Ethereum Attestation Service contract address
+    /// @param eas_ New EAS contract address
+    function setEAS(
+        address eas_
+    ) external onlyRole(ADMIN_ROLE) {
         if (eas_ == address(0)) {
             revert ZeroAddress();
         }
@@ -120,15 +149,23 @@ contract Attester is IAttester, AccessControlUpgradeable, UUPSUpgradeable {
         emit EASUpdated(eas_);
     }
 
-    function getAttestation(bytes32 attestationUID) external view returns (EASAttestation memory) {
+    /// @notice Fetches a raw attestation by UID, reverting if it doesn't exist
+    /// @param attestationUID UID of the attestation to fetch
+    /// @return The raw EAS attestation
+    function getAttestation(
+        bytes32 attestationUID
+    ) external view returns (EASAttestation memory) {
         return _getAttestation(attestationUID);
     }
 
-    function getVerificationAttestation(bytes32 attestationUID)
-        external
-        view
-        returns (VerificationPayload memory payload, address attesterAddress, uint256 attestedAt)
-    {
+    /// @notice Fetches and decodes a verification attestation by UID
+    /// @param attestationUID UID of the attestation to fetch
+    /// @return payload Decoded verification data
+    /// @return attesterAddress Address that submitted the attestation
+    /// @return attestedAt Timestamp the attestation was recorded
+    function getVerificationAttestation(
+        bytes32 attestationUID
+    ) external view returns (VerificationPayload memory payload, address attesterAddress, uint256 attestedAt) {
         EASAttestation memory attestation = _requireSchema(attestationUID, verificationSchema);
         (
             string memory issuerId,
@@ -151,11 +188,14 @@ contract Attester is IAttester, AccessControlUpgradeable, UUPSUpgradeable {
         attestedAt = uint256(attestation.time);
     }
 
-    function getScoreAttestation(bytes32 attestationUID)
-        external
-        view
-        returns (ScorePayload memory payload, address attesterAddress, uint256 attestedAt)
-    {
+    /// @notice Fetches and decodes a score attestation by UID
+    /// @param attestationUID UID of the attestation to fetch
+    /// @return payload Decoded score data
+    /// @return attesterAddress Address that submitted the attestation
+    /// @return attestedAt Timestamp the attestation was recorded
+    function getScoreAttestation(
+        bytes32 attestationUID
+    ) external view returns (ScorePayload memory payload, address attesterAddress, uint256 attestedAt) {
         EASAttestation memory attestation = _requireSchema(attestationUID, scoreSchema);
         (
             string memory issuerId,
@@ -176,11 +216,14 @@ contract Attester is IAttester, AccessControlUpgradeable, UUPSUpgradeable {
         attestedAt = uint256(attestation.time);
     }
 
-    function getDistributionAttestation(bytes32 attestationUID)
-        external
-        view
-        returns (DistributionPayload memory payload, address attesterAddress, uint256 attestedAt)
-    {
+    /// @notice Fetches and decodes a distribution attestation by UID
+    /// @param attestationUID UID of the attestation to fetch
+    /// @return payload Decoded distribution data
+    /// @return attesterAddress Address that submitted the attestation
+    /// @return attestedAt Timestamp the attestation was recorded
+    function getDistributionAttestation(
+        bytes32 attestationUID
+    ) external view returns (DistributionPayload memory payload, address attesterAddress, uint256 attestedAt) {
         EASAttestation memory attestation = _requireSchema(attestationUID, distributionSchema);
         (
             string memory issuerId,
@@ -201,10 +244,23 @@ contract Attester is IAttester, AccessControlUpgradeable, UUPSUpgradeable {
         attestedAt = uint256(attestation.time);
     }
 
-    // solhint-disable-next-line no-empty-blocks
-    function _authorizeUpgrade(address newImplementation) internal override onlyRole(ADMIN_ROLE) { }
+    // solhint-disable no-empty-blocks
+    /// @notice Authorizes a UUPS upgrade; restricted to the admin role
+    /// @param newImplementation Address of the new implementation contract
+    function _authorizeUpgrade(
+        address newImplementation
+    ) internal override onlyRole(ADMIN_ROLE) { }
 
-    function _attest(bytes32 schema, bytes memory data) private returns (bytes32) {
+    // solhint-enable no-empty-blocks
+
+    /// @notice Submits an attestation to EAS for the given schema and encoded data
+    /// @param schema Schema UID to attest against
+    /// @param data ABI-encoded attestation payload
+    /// @return UID of the created attestation
+    function _attest(
+        bytes32 schema,
+        bytes memory data
+    ) private returns (bytes32) {
         if (schema == bytes32(0)) {
             revert SchemaNotSet();
         }
@@ -213,29 +269,32 @@ contract Attester is IAttester, AccessControlUpgradeable, UUPSUpgradeable {
             AttestationRequest({
                 schema: schema,
                 data: AttestationRequestData({
-                    recipient: address(0),
-                    expirationTime: 0,
-                    revocable: false,
-                    refUID: bytes32(0),
-                    data: data,
-                    value: 0
+                    recipient: address(0), expirationTime: 0, revocable: false, refUID: bytes32(0), data: data, value: 0
                 })
             })
         );
     }
 
-    function _getAttestation(bytes32 attestationUID) private view returns (EASAttestation memory attestation) {
+    /// @notice Fetches an attestation from EAS by UID, reverting if it doesn't exist
+    /// @param attestationUID UID of the attestation to fetch
+    /// @return attestation The raw EAS attestation
+    function _getAttestation(
+        bytes32 attestationUID
+    ) private view returns (EASAttestation memory attestation) {
         attestation = eas.getAttestation(attestationUID);
         if (attestation.uid == bytes32(0)) {
             revert AttestationNotFound(attestationUID);
         }
     }
 
-    function _requireSchema(bytes32 attestationUID, bytes32 expectedSchema)
-        private
-        view
-        returns (EASAttestation memory attestation)
-    {
+    /// @notice Fetches an attestation and verifies it matches the expected schema
+    /// @param attestationUID UID of the attestation to fetch
+    /// @param expectedSchema Schema UID the attestation must match
+    /// @return attestation The raw EAS attestation
+    function _requireSchema(
+        bytes32 attestationUID,
+        bytes32 expectedSchema
+    ) private view returns (EASAttestation memory attestation) {
         if (expectedSchema == bytes32(0)) {
             revert SchemaNotSet();
         }

@@ -8,6 +8,9 @@ import { IDistribution } from "../../src/interfaces/IDistribution.sol";
 import { MockToken } from "../mocks/MockToken.sol";
 import { DeployHelpers } from "../helpers/DeployHelpers.sol";
 
+/// @title DistributionTest
+/// @author Sahih Contracts
+/// @notice Unit tests for the Distribution contract
 contract DistributionTest is Test, DeployHelpers {
     Distribution internal distribution;
     MockToken internal paymentToken;
@@ -19,11 +22,13 @@ contract DistributionTest is Test, DeployHelpers {
     address internal investorA = makeAddr("investorA");
     address internal investorB = makeAddr("investorB");
 
+    /// @notice Deploys a fresh Distribution and funds it with payment tokens before each test
     function setUp() public {
         (distribution, paymentToken) = deployDistribution(admin, operator);
         paymentToken.mint(address(distribution), PAYMENT_TOKEN_FUNDING);
     }
 
+    /// @notice Recording a distribution transfers the correct amounts to each holder
     function test_RecordDistributionTransfersToHolders() public {
         IDistribution.HolderAmount[] memory holders = holderAmounts(investorA, 127_500, investorB, 297_500);
 
@@ -35,14 +40,14 @@ contract DistributionTest is Test, DeployHelpers {
         assertEq(paymentToken.balanceOf(address(distribution)), PAYMENT_TOKEN_FUNDING - 425_000);
     }
 
+    /// @notice Recording a distribution persists a retrievable distribution record
     function test_RecordDistributionStoresRecord() public {
         IDistribution.HolderAmount[] memory holders = holderAmounts(investorA, 100, investorB, 200);
 
         vm.prank(operator);
         distribution.recordDistribution(issuerContract, PERIOD_W32, holders, 300, CALCULATION_REF_HASH);
 
-        IDistribution.DistributionRecord memory record =
-            distribution.getDistributionRecord(issuerContract, PERIOD_W32);
+        IDistribution.DistributionRecord memory record = distribution.getDistributionRecord(issuerContract, PERIOD_W32);
 
         assertEq(record.period, PERIOD_W32);
         assertEq(record.totalAmount, 300);
@@ -51,29 +56,31 @@ contract DistributionTest is Test, DeployHelpers {
         assertTrue(record.recorded);
     }
 
+    /// @notice Recording a distribution emits the Distributed event with the expected data
     function test_RecordDistributionEmitsDistributed() public {
         IDistribution.HolderAmount[] memory holders = singleHolderAmount(investorA, 500);
 
-        vm.expectEmit(true, false, false, true, address(distribution));
+        vm.expectEmit(true, true, true, true, address(distribution));
         emit IDistribution.Distributed(issuerContract, PERIOD_W32, 500, block.timestamp);
 
         vm.prank(operator);
         distribution.recordDistribution(issuerContract, PERIOD_W32, holders, 500, CALCULATION_REF_HASH);
     }
 
+    /// @notice A distribution with an empty holder list and zero total amount is allowed
     function test_RecordDistributionAllowsZeroTotal() public {
         IDistribution.HolderAmount[] memory holders = new IDistribution.HolderAmount[](0);
 
         vm.prank(operator);
         distribution.recordDistribution(issuerContract, PERIOD_W32, holders, 0, CALCULATION_REF_HASH);
 
-        IDistribution.DistributionRecord memory record =
-            distribution.getDistributionRecord(issuerContract, PERIOD_W32);
+        IDistribution.DistributionRecord memory record = distribution.getDistributionRecord(issuerContract, PERIOD_W32);
 
         assertTrue(record.recorded);
         assertEq(record.totalAmount, 0);
     }
 
+    /// @notice Reverts when the declared total amount does not match the sum of holder amounts
     function test_RevertWhen_TotalDoesNotMatchBreakdown() public {
         IDistribution.HolderAmount[] memory holders = holderAmounts(investorA, 100, investorB, 200);
 
@@ -82,19 +89,19 @@ contract DistributionTest is Test, DeployHelpers {
         distribution.recordDistribution(issuerContract, PERIOD_W32, holders, 500, CALCULATION_REF_HASH);
     }
 
+    /// @notice Reverts when attempting to record a distribution for a period already recorded
     function test_RevertWhen_PeriodAlreadyRecorded() public {
         IDistribution.HolderAmount[] memory holders = singleHolderAmount(investorA, 100);
 
         vm.startPrank(operator);
         distribution.recordDistribution(issuerContract, PERIOD_W32, holders, 100, CALCULATION_REF_HASH);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(Distribution.PeriodAlreadyRecorded.selector, issuerContract, PERIOD_W32)
-        );
+        vm.expectRevert(abi.encodeWithSelector(Distribution.PeriodAlreadyRecorded.selector, issuerContract, PERIOD_W32));
         distribution.recordDistribution(issuerContract, PERIOD_W32, holders, 100, CALCULATION_REF_HASH);
         vm.stopPrank();
     }
 
+    /// @notice Reverts when the contract's token balance is insufficient to cover the distribution
     function test_RevertWhen_ContractBalanceInsufficient() public {
         uint256 amount = PAYMENT_TOKEN_FUNDING + 1;
         IDistribution.HolderAmount[] memory holders = singleHolderAmount(investorA, amount);
@@ -106,34 +113,35 @@ contract DistributionTest is Test, DeployHelpers {
         distribution.recordDistribution(issuerContract, PERIOD_W32, holders, amount, CALCULATION_REF_HASH);
     }
 
+    /// @notice Reverts when a non-operator attempts to record a distribution
     function test_RevertWhen_NonOperatorRecordsDistribution() public {
         IDistribution.HolderAmount[] memory holders = singleHolderAmount(investorA, 100);
+        bytes32 operatorRole = distribution.OPERATOR_ROLE();
 
         vm.prank(outsider);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector, outsider, distribution.OPERATOR_ROLE()
-            )
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, outsider, operatorRole)
         );
         distribution.recordDistribution(issuerContract, PERIOD_W32, holders, 100, CALCULATION_REF_HASH);
     }
 
+    /// @notice Reverts when the number of holders exceeds the maximum allowed per distribution
     function test_RevertWhen_HolderCountExceedsMaximum() public {
-        uint256 count = distribution.MAX_HOLDERS_PER_DISTRIBUTION() + 1;
+        uint256 maxHolders = distribution.MAX_HOLDERS_PER_DISTRIBUTION();
+        uint256 count = maxHolders + 1;
         IDistribution.HolderAmount[] memory holders = new IDistribution.HolderAmount[](count);
-        for (uint256 i = 0; i < count; i++) {
+        for (uint256 i = 0; i < count; ++i) {
+            // casting to 'uint160' is safe because i + 1 <= MAX_HOLDERS_PER_DISTRIBUTION + 1
+            // forge-lint: disable-next-line(unsafe-typecast)
             holders[i] = IDistribution.HolderAmount({ holderAddress: address(uint160(i + 1)), amount: 1 });
         }
 
         vm.prank(operator);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                Distribution.TooManyHolders.selector, count, distribution.MAX_HOLDERS_PER_DISTRIBUTION()
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(Distribution.TooManyHolders.selector, count, maxHolders));
         distribution.recordDistribution(issuerContract, PERIOD_W32, holders, count, CALCULATION_REF_HASH);
     }
 
+    /// @notice Reverts when a holder entry has the zero address
     function test_RevertWhen_HolderAddressIsZero() public {
         IDistribution.HolderAmount[] memory holders = holderAmounts(investorA, 100, address(0), 200);
 
@@ -142,6 +150,7 @@ contract DistributionTest is Test, DeployHelpers {
         distribution.recordDistribution(issuerContract, PERIOD_W32, holders, 300, CALCULATION_REF_HASH);
     }
 
+    /// @notice Reverts when the period string is empty
     function test_RevertWhen_PeriodIsEmpty() public {
         IDistribution.HolderAmount[] memory holders = singleHolderAmount(investorA, 100);
 
@@ -150,6 +159,7 @@ contract DistributionTest is Test, DeployHelpers {
         distribution.recordDistribution(issuerContract, "", holders, 100, CALCULATION_REF_HASH);
     }
 
+    /// @notice Distribution history is correctly filtered by the given period range
     function test_GetDistributionHistoryFiltersByRange() public {
         IDistribution.HolderAmount[] memory holders = singleHolderAmount(investorA, 100);
 
@@ -167,6 +177,7 @@ contract DistributionTest is Test, DeployHelpers {
         assertEq(history[1].period, PERIOD_W32);
     }
 
+    /// @notice An investor's distributions across multiple periods are all returned
     function test_GetInvestorDistributions() public {
         IDistribution.HolderAmount[] memory holders = holderAmounts(investorA, 100, investorB, 200);
 
@@ -184,6 +195,7 @@ contract DistributionTest is Test, DeployHelpers {
         assertEq(received[1].period, PERIOD_W32);
     }
 
+    /// @notice An admin can update the payment token used for distributions
     function test_AdminUpdatesPaymentToken() public {
         MockToken newToken = new MockToken("Mock Rupiah 2", "MIDR2");
 
@@ -193,14 +205,14 @@ contract DistributionTest is Test, DeployHelpers {
         assertEq(address(distribution.paymentToken()), address(newToken));
     }
 
+    /// @notice Reverts when a non-admin attempts to upgrade the contract
     function test_RevertWhen_NonAdminUpgrades() public {
         address newImplementation = address(new Distribution());
+        bytes32 adminRole = distribution.ADMIN_ROLE();
 
         vm.prank(operator);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector, operator, distribution.ADMIN_ROLE()
-            )
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, operator, adminRole)
         );
         distribution.upgradeToAndCall(newImplementation, "");
     }
