@@ -9,8 +9,10 @@ import { Attester } from "../../src/Attester.sol";
 import { IIssuerToken } from "../../src/interfaces/IIssuerToken.sol";
 import { IDistribution } from "../../src/interfaces/IDistribution.sol";
 import { IAttester } from "../../src/interfaces/IAttester.sol";
-import { MockEAS } from "../mocks/MockEAS.sol";
-import { MockToken } from "../mocks/MockToken.sol";
+import { SahihSchemaRegistry } from "../../src/SahihSchemaRegistry.sol";
+import { SahihAttestationRegistry } from "../../src/SahihAttestationRegistry.sol";
+import { SahihSchemas } from "../../src/libraries/SahihSchemas.sol";
+import { DemoPaymentToken } from "../../src/DemoPaymentToken.sol";
 import { TestConstants } from "./TestConstants.sol";
 
 /// @title DeployHelpers
@@ -58,8 +60,8 @@ abstract contract DeployHelpers is TestConstants {
     function deployDistribution(
         address admin,
         address operator
-    ) internal returns (Distribution distribution, MockToken paymentToken) {
-        paymentToken = new MockToken("Mock Rupiah", "MIDR");
+    ) internal returns (Distribution distribution, DemoPaymentToken paymentToken) {
+        paymentToken = new DemoPaymentToken("Mock Rupiah", "MIDR");
         address implementation = address(new Distribution());
         distribution = Distribution(
             address(
@@ -70,14 +72,37 @@ abstract contract DeployHelpers is TestConstants {
         );
     }
 
-    /// @notice Deploys and initializes an Attester proxy with a fresh mock EAS and sample schemas
+    /// @notice Deploys the schema registry and attestation registry, registering the platform schemas
+    /// @return schemaRegistry The deployed schema registry
+    /// @return eas The deployed attestation registry
+    /// @return verificationSchema Registered verification schema UID
+    /// @return scoreSchema Registered score schema UID
+    /// @return distributionSchema Registered distribution schema UID
+    function deployAttestationStack()
+        internal
+        returns (
+            SahihSchemaRegistry schemaRegistry,
+            SahihAttestationRegistry eas,
+            bytes32 verificationSchema,
+            bytes32 scoreSchema,
+            bytes32 distributionSchema
+        )
+    {
+        schemaRegistry = new SahihSchemaRegistry();
+        verificationSchema = schemaRegistry.register(SahihSchemas.VERIFICATION, address(0), false);
+        scoreSchema = schemaRegistry.register(SahihSchemas.SCORE, address(0), false);
+        distributionSchema = schemaRegistry.register(SahihSchemas.DISTRIBUTION, address(0), false);
+        eas = new SahihAttestationRegistry(schemaRegistry);
+    }
+
+    /// @notice Deploys and initializes an Attester proxy wired to a fresh attestation stack
     /// @param admin Address granted the default admin and admin roles
     /// @param operator Address granted the operator role
     /// @return attester The deployed and initialized Attester proxy
-    /// @return eas The mock EAS used by the attester
-    /// @return verificationSchema Sample verification schema UID
-    /// @return scoreSchema Sample score schema UID
-    /// @return distributionSchema Sample distribution schema UID
+    /// @return eas The attestation registry used by the attester
+    /// @return verificationSchema Registered verification schema UID
+    /// @return scoreSchema Registered score schema UID
+    /// @return distributionSchema Registered distribution schema UID
     function deployAttester(
         address admin,
         address operator
@@ -85,16 +110,13 @@ abstract contract DeployHelpers is TestConstants {
         internal
         returns (
             Attester attester,
-            MockEAS eas,
+            SahihAttestationRegistry eas,
             bytes32 verificationSchema,
             bytes32 scoreSchema,
             bytes32 distributionSchema
         )
     {
-        eas = new MockEAS();
-        verificationSchema = keccak256("VerificationSchema");
-        scoreSchema = keccak256("ScoreSchema");
-        distributionSchema = keccak256("DistributionSchema");
+        (, eas, verificationSchema, scoreSchema, distributionSchema) = deployAttestationStack();
 
         address implementation = address(new Attester());
         attester = Attester(

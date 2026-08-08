@@ -5,8 +5,8 @@ import { Test } from "forge-std/Test.sol";
 import { IAccessControl } from "@openzeppelin/contracts/access/IAccessControl.sol";
 import { Attester } from "../../src/Attester.sol";
 import { IAttester } from "../../src/interfaces/IAttester.sol";
-import { EASAttestation } from "../../src/interfaces/IEAS.sol";
-import { MockEAS } from "../mocks/MockEAS.sol";
+import { AttestationRequest, AttestationRequestData, EASAttestation } from "../../src/interfaces/IEAS.sol";
+import { SahihAttestationRegistry } from "../../src/SahihAttestationRegistry.sol";
 import { DeployHelpers } from "../helpers/DeployHelpers.sol";
 
 /// @title AttesterTest
@@ -14,7 +14,7 @@ import { DeployHelpers } from "../helpers/DeployHelpers.sol";
 /// @notice Unit tests for the Attester contract
 contract AttesterTest is Test, DeployHelpers {
     Attester internal attester;
-    MockEAS internal eas;
+    SahihAttestationRegistry internal eas;
     bytes32 internal verificationSchema;
     bytes32 internal scoreSchema;
     bytes32 internal distributionSchema;
@@ -134,6 +134,55 @@ contract AttesterTest is Test, DeployHelpers {
 
         vm.expectRevert(abi.encodeWithSelector(Attester.AttestationNotFound.selector, unknown));
         attester.getAttestation(unknown);
+    }
+
+    /// @notice A third party writing directly to the registry cannot pass its data off as platform-attested
+    /// @dev The registry is permissionless, so an outsider can write against the platform's own schema UID.
+    ///      The typed getters must refuse to vouch for anything this contract did not itself attest.
+    function test_RevertWhen_AttestationWrittenByOutsider() public {
+        bytes memory forged = abi.encode(
+            ISSUER_ID, PERIOD_W31, AVG_REVENUE * 100, VOLATILITY_INDEX, DATA_REF_HASH, uint256(1_754_211_600)
+        );
+
+        vm.prank(outsider);
+        bytes32 uid = eas.attest(
+            AttestationRequest({
+                schema: verificationSchema,
+                data: AttestationRequestData({
+                    recipient: address(0),
+                    expirationTime: 0,
+                    revocable: false,
+                    refUID: bytes32(0),
+                    data: forged,
+                    value: 0
+                })
+            })
+        );
+
+        vm.expectRevert(abi.encodeWithSelector(Attester.UnauthorizedAttester.selector, outsider));
+        attester.getVerificationAttestation(uid);
+    }
+
+    /// @notice The raw getter still exposes third-party attestations, leaving the trust decision to the caller
+    function test_RawGetAttestationDoesNotFilterByAttester() public {
+        vm.prank(outsider);
+        bytes32 uid = eas.attest(
+            AttestationRequest({
+                schema: verificationSchema,
+                data: AttestationRequestData({
+                    recipient: address(0),
+                    expirationTime: 0,
+                    revocable: false,
+                    refUID: bytes32(0),
+                    data: abi.encode("anything"),
+                    value: 0
+                })
+            })
+        );
+
+        EASAttestation memory attestation = attester.getAttestation(uid);
+
+        assertEq(attestation.attester, outsider);
     }
 
     /// @notice Reverts when a non-admin attempts to update the schemas

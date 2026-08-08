@@ -30,6 +30,7 @@ contract Attester is IAttester, AccessControlUpgradeable, UUPSUpgradeable {
     error SchemaNotSet();
     error SchemaMismatch(bytes32 expected, bytes32 actual);
     error AttestationNotFound(bytes32 attestationUID);
+    error UnauthorizedAttester(address attester);
 
     /// @notice Disables initializers on the implementation contract
     constructor() {
@@ -287,10 +288,15 @@ contract Attester is IAttester, AccessControlUpgradeable, UUPSUpgradeable {
         }
     }
 
-    /// @notice Fetches an attestation and verifies it matches the expected schema
+    /// @notice Fetches an attestation and verifies it matches the expected schema and was written by this contract
     /// @param attestationUID UID of the attestation to fetch
     /// @param expectedSchema Schema UID the attestation must match
     /// @return attestation The raw EAS attestation
+    /// @dev EAS is permissionless: anyone can write an attestation against any schema UID, including
+    ///      the platform's own. Without the attester check below, a third party could craft an
+    ///      attestation and have the typed getters vouch for it as genuine platform data. The
+    ///      `OPERATOR_ROLE` gate on the attest functions only governs what this contract writes,
+    ///      not what it will read back and endorse. Use `getAttestation` for raw, unvouched reads.
     function _requireSchema(
         bytes32 attestationUID,
         bytes32 expectedSchema
@@ -302,6 +308,9 @@ contract Attester is IAttester, AccessControlUpgradeable, UUPSUpgradeable {
         attestation = _getAttestation(attestationUID);
         if (attestation.schema != expectedSchema) {
             revert SchemaMismatch(expectedSchema, attestation.schema);
+        }
+        if (attestation.attester != address(this)) {
+            revert UnauthorizedAttester(attestation.attester);
         }
     }
 }

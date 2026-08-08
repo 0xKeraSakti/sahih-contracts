@@ -10,7 +10,7 @@ import { Distribution } from "../../src/Distribution.sol";
 import { IIssuerToken } from "../../src/interfaces/IIssuerToken.sol";
 import { IDistribution } from "../../src/interfaces/IDistribution.sol";
 import { IssuerTokenV2 } from "../mocks/IssuerTokenV2.sol";
-import { MockToken } from "../mocks/MockToken.sol";
+import { DemoPaymentToken } from "../../src/DemoPaymentToken.sol";
 import { DeployHelpers } from "../helpers/DeployHelpers.sol";
 
 /// @title UpgradeFlowTest
@@ -19,7 +19,7 @@ import { DeployHelpers } from "../helpers/DeployHelpers.sol";
 contract UpgradeFlowTest is Test, DeployHelpers {
     Factory internal factory;
     Distribution internal distribution;
-    MockToken internal paymentToken;
+    DemoPaymentToken internal paymentToken;
     IssuerToken internal token;
 
     address internal admin = makeAddr("admin");

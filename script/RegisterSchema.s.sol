@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import { Script } from "forge-std/Script.sol";
+import { BaseScript } from "./BaseScript.sol";
 import { console2 } from "forge-std/console2.sol";
 import { ISchemaRegistry } from "../src/interfaces/ISchemaRegistry.sol";
+import { SahihSchemas } from "../src/libraries/SahihSchemas.sol";
 
-contract RegisterSchema is Script {
-    string public constant VERIFICATION_SCHEMA =
-        "string issuerId,string period,uint256 avgRevenue,uint256 volatilityIndex,bytes32 dataRefHash,uint256 timestamp";
-    string public constant SCORE_SCHEMA =
-        "string issuerId,uint256 score,string scoringMethodVersion,string period,uint256 timestamp";
-    string public constant DISTRIBUTION_SCHEMA =
-        "string issuerId,string period,uint256 totalAmount,bytes32 calculationRefHash,uint256 timestamp";
-
+/// @title RegisterSchema
+/// @author Sahih Contracts
+/// @notice Registers the three platform schemas against an existing EAS schema registry
+/// @dev Use this on chains running canonical EAS, pointing EAS_SCHEMA_REGISTRY_ADDRESS at the
+///      official deployment. On chains without EAS, `DeployAttestationStack.s.sol` deploys a
+///      registry and performs this registration in the same run.
+contract RegisterSchema is BaseScript {
     error MissingEnvAddress(string name);
 
     function run() external returns (bytes32 verificationUID, bytes32 scoreUID, bytes32 distributionUID) {
@@ -23,10 +23,10 @@ contract RegisterSchema is Script {
 
         ISchemaRegistry registry = ISchemaRegistry(registryAddress);
 
-        vm.startBroadcast();
-        verificationUID = registry.register(VERIFICATION_SCHEMA, address(0), false);
-        scoreUID = registry.register(SCORE_SCHEMA, address(0), false);
-        distributionUID = registry.register(DISTRIBUTION_SCHEMA, address(0), false);
+        _startBroadcast();
+        verificationUID = registry.register(SahihSchemas.VERIFICATION, address(0), false);
+        scoreUID = registry.register(SahihSchemas.SCORE, address(0), false);
+        distributionUID = registry.register(SahihSchemas.DISTRIBUTION, address(0), false);
         vm.stopBroadcast();
 
         console2.logBytes32(verificationUID);

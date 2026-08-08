@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import { Script } from "forge-std/Script.sol";
+import { BaseScript } from "./BaseScript.sol";
 import { console2 } from "forge-std/console2.sol";
 import { Upgrades } from "openzeppelin-foundry-upgrades/Upgrades.sol";
 import { Options } from "openzeppelin-foundry-upgrades/Options.sol";
 
-contract Upgrade is Script {
+contract Upgrade is BaseScript {
     error MissingEnvAddress(string name);
 
     function run() external {
@@ -24,7 +24,7 @@ contract Upgrade is Script {
             Upgrades.validateUpgrade(contractName, options);
         }
 
-        vm.startBroadcast();
+        _startBroadcast();
         Upgrades.upgradeProxy(proxy, contractName, "", options);
         vm.stopBroadcast();
 

@@ -8,8 +8,8 @@ import { Distribution } from "../../src/Distribution.sol";
 import { Attester } from "../../src/Attester.sol";
 import { IAttester } from "../../src/interfaces/IAttester.sol";
 import { IDistribution } from "../../src/interfaces/IDistribution.sol";
-import { MockEAS } from "../mocks/MockEAS.sol";
-import { MockToken } from "../mocks/MockToken.sol";
+import { SahihAttestationRegistry } from "../../src/SahihAttestationRegistry.sol";
+import { DemoPaymentToken } from "../../src/DemoPaymentToken.sol";
 import { DeployHelpers } from "../helpers/DeployHelpers.sol";
 
 /// @title FullIssuerLifecycleTest
@@ -19,8 +19,8 @@ contract FullIssuerLifecycleTest is Test, DeployHelpers {
     Factory internal factory;
     Distribution internal distribution;
     Attester internal attester;
-    MockEAS internal eas;
-    MockToken internal paymentToken;
+    SahihAttestationRegistry internal eas;
+    DemoPaymentToken internal paymentToken;
 
     bytes32 internal verificationSchema;
     bytes32 internal scoreSchema;
@@ -91,7 +91,7 @@ contract FullIssuerLifecycleTest is Test, DeployHelpers {
 
         assertEq(paymentToken.balanceOf(investorA), 127_500);
         assertEq(paymentToken.balanceOf(investorB), 297_500);
-        assertEq(eas.nonce(), 5);
+        assertEq(eas.attestationCount(), 5);
 
         (IAttester.VerificationPayload memory storedW31,,) = attester.getVerificationAttestation(verificationW31);
         assertEq(storedW31.period, PERIOD_W31);

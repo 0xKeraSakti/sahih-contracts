@@ -4,7 +4,7 @@ pragma solidity ^0.8.20;
 import { Test } from "forge-std/Test.sol";
 import { Distribution } from "../../src/Distribution.sol";
 import { IDistribution } from "../../src/interfaces/IDistribution.sol";
-import { MockToken } from "../mocks/MockToken.sol";
+import { DemoPaymentToken } from "../../src/DemoPaymentToken.sol";
 import { DeployHelpers } from "../helpers/DeployHelpers.sol";
 
 /// @title DistributionHandler
@@ -14,7 +14,7 @@ contract DistributionHandler is Test {
     /// @notice The Distribution contract under test
     Distribution public immutable DISTRIBUTION;
     /// @notice The payment token used for distributions
-    MockToken public immutable PAYMENT_TOKEN;
+    DemoPaymentToken public immutable PAYMENT_TOKEN;
     /// @notice The issuer contract address used for all recorded distributions
     address public immutable ISSUER_CONTRACT;
     /// @notice The first holder address that receives a share of each distribution
@@ -37,7 +37,7 @@ contract DistributionHandler is Test {
     /// @param holderB_ The second holder address
     constructor(
         Distribution distribution_,
-        MockToken paymentToken_,
+        DemoPaymentToken paymentToken_,
         address issuerContract_,
         address holderA_,
         address holderB_
@@ -77,7 +77,7 @@ contract DistributionHandler is Test {
 /// @notice Invariant tests verifying Distribution's accounting stays consistent under randomized calls
 contract DistributionInvariantTest is Test, DeployHelpers {
     Distribution internal distribution;
-    MockToken internal paymentToken;
+    DemoPaymentToken internal paymentToken;
     DistributionHandler internal handler;
 
     address internal admin = makeAddr("admin");

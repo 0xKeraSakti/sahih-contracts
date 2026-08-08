@@ -5,7 +5,7 @@ import { Test } from "forge-std/Test.sol";
 import { IAccessControl } from "@openzeppelin/contracts/access/IAccessControl.sol";
 import { Distribution } from "../../src/Distribution.sol";
 import { IDistribution } from "../../src/interfaces/IDistribution.sol";
-import { MockToken } from "../mocks/MockToken.sol";
+import { DemoPaymentToken } from "../../src/DemoPaymentToken.sol";
 import { DeployHelpers } from "../helpers/DeployHelpers.sol";
 
 /// @title DistributionTest
@@ -13,7 +13,7 @@ import { DeployHelpers } from "../helpers/DeployHelpers.sol";
 /// @notice Unit tests for the Distribution contract
 contract DistributionTest is Test, DeployHelpers {
     Distribution internal distribution;
-    MockToken internal paymentToken;
+    DemoPaymentToken internal paymentToken;
 
     address internal admin = makeAddr("admin");
     address internal operator = makeAddr("operator");
@@ -197,7 +197,7 @@ contract DistributionTest is Test, DeployHelpers {
 
     /// @notice An admin can update the payment token used for distributions
     function test_AdminUpdatesPaymentToken() public {
-        MockToken newToken = new MockToken("Mock Rupiah 2", "MIDR2");
+        DemoPaymentToken newToken = new DemoPaymentToken("Mock Rupiah 2", "MIDR2");
 
         vm.prank(admin);
         distribution.setPaymentToken(address(newToken));
