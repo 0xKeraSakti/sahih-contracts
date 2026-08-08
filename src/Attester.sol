@@ -23,8 +23,10 @@ contract Attester is IAttester, AccessControlUpgradeable, UUPSUpgradeable {
     bytes32 public scoreSchema;
     /// @notice Schema UID used for distribution attestations
     bytes32 public distributionSchema;
+    /// @notice Latest attestation UID for a given kind, issuer, and period
+    mapping(bytes32 => bytes32) private _attestationIndex;
 
-    uint256[50] private __gap;
+    uint256[49] private __gap;
 
     error ZeroAddress();
     error SchemaNotSet();
@@ -88,8 +90,9 @@ contract Attester is IAttester, AccessControlUpgradeable, UUPSUpgradeable {
             payload.timestamp
         );
         attestationUID = _attest(verificationSchema, data);
+        _index(AttestationKind.Verification, payload.issuerId, payload.period, attestationUID);
 
-        emit VerificationAttested(payload.issuerId, payload.period, attestationUID);
+        emit VerificationAttested(keccak256(bytes(payload.issuerId)), attestationUID, payload.issuerId, payload.period);
     }
 
     /// @notice Records a score attestation for an issuer
@@ -102,8 +105,9 @@ contract Attester is IAttester, AccessControlUpgradeable, UUPSUpgradeable {
             payload.issuerId, payload.score, payload.scoringMethodVersion, payload.period, payload.timestamp
         );
         attestationUID = _attest(scoreSchema, data);
+        _index(AttestationKind.Score, payload.issuerId, payload.period, attestationUID);
 
-        emit ScoreAttested(payload.issuerId, payload.period, attestationUID);
+        emit ScoreAttested(keccak256(bytes(payload.issuerId)), attestationUID, payload.issuerId, payload.period);
     }
 
     /// @notice Records a distribution attestation for an issuer
@@ -116,8 +120,9 @@ contract Attester is IAttester, AccessControlUpgradeable, UUPSUpgradeable {
             payload.issuerId, payload.period, payload.totalAmount, payload.calculationRefHash, payload.timestamp
         );
         attestationUID = _attest(distributionSchema, data);
+        _index(AttestationKind.Distribution, payload.issuerId, payload.period, attestationUID);
 
-        emit DistributionAttested(payload.issuerId, payload.period, attestationUID);
+        emit DistributionAttested(keccak256(bytes(payload.issuerId)), attestationUID, payload.issuerId, payload.period);
     }
 
     /// @notice Updates the verification, score, and distribution schema UIDs
@@ -149,6 +154,21 @@ contract Attester is IAttester, AccessControlUpgradeable, UUPSUpgradeable {
         emit EASUpdated(eas_);
     }
 
+    /// @notice Looks up the most recent attestation UID for an issuer, period, and kind
+    /// @dev Lets an issuer's attestation history be recovered straight from the chain rather than
+    /// relying on an off-chain index of UIDs
+    /// @param kind Which of the three attestation kinds to look up
+    /// @param issuerId Issuer the attestation belongs to
+    /// @param period Period identifier the attestation covers
+    /// @return UID of the latest matching attestation, or zero if none exists
+    function getAttestationUID(
+        AttestationKind kind,
+        string calldata issuerId,
+        string calldata period
+    ) external view returns (bytes32) {
+        return _attestationIndex[_indexKey(kind, issuerId, period)];
+    }
+
     /// @notice Fetches a raw attestation by UID, reverting if it doesn't exist
     /// @param attestationUID UID of the attestation to fetch
     /// @return The raw EAS attestation
@@ -171,10 +191,10 @@ contract Attester is IAttester, AccessControlUpgradeable, UUPSUpgradeable {
             string memory issuerId,
             string memory period,
             uint256 avgRevenue,
-            uint256 volatilityIndex,
+            uint8 volatilityIndex,
             bytes32 dataRefHash,
             uint256 timestamp
-        ) = abi.decode(attestation.data, (string, string, uint256, uint256, bytes32, uint256));
+        ) = abi.decode(attestation.data, (string, string, uint256, uint8, bytes32, uint256));
 
         payload = VerificationPayload({
             issuerId: issuerId,
@@ -252,6 +272,33 @@ contract Attester is IAttester, AccessControlUpgradeable, UUPSUpgradeable {
     ) internal override onlyRole(ADMIN_ROLE) { }
 
     // solhint-enable no-empty-blocks
+
+    /// @notice Records an attestation UID under its issuer, period, and kind
+    /// @param kind Which of the three attestation kinds this is
+    /// @param issuerId Issuer the attestation belongs to
+    /// @param period Period identifier the attestation covers
+    /// @param attestationUID UID to record
+    function _index(
+        AttestationKind kind,
+        string calldata issuerId,
+        string calldata period,
+        bytes32 attestationUID
+    ) private {
+        _attestationIndex[_indexKey(kind, issuerId, period)] = attestationUID;
+    }
+
+    /// @notice Builds the index key for an attestation kind, issuer, and period
+    /// @param kind Which of the three attestation kinds this is
+    /// @param issuerId Issuer the attestation belongs to
+    /// @param period Period identifier the attestation covers
+    /// @return The index key
+    function _indexKey(
+        AttestationKind kind,
+        string calldata issuerId,
+        string calldata period
+    ) private pure returns (bytes32) {
+        return keccak256(abi.encode(kind, issuerId, period));
+    }
 
     /// @notice Submits an attestation to EAS for the given schema and encoded data
     /// @param schema Schema UID to attest against

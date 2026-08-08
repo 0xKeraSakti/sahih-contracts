@@ -61,7 +61,9 @@ contract DistributionTest is Test, DeployHelpers {
         IDistribution.HolderAmount[] memory holders = singleHolderAmount(investorA, 500);
 
         vm.expectEmit(true, true, true, true, address(distribution));
-        emit IDistribution.Distributed(issuerContract, PERIOD_W32, 500, block.timestamp);
+        emit IDistribution.Distributed(
+            issuerContract, keccak256(bytes(PERIOD_W32)), PERIOD_W32, 500, 0, block.timestamp
+        );
 
         vm.prank(operator);
         distribution.recordDistribution(issuerContract, PERIOD_W32, holders, 500, CALCULATION_REF_HASH);
@@ -89,16 +91,147 @@ contract DistributionTest is Test, DeployHelpers {
         distribution.recordDistribution(issuerContract, PERIOD_W32, holders, 500, CALCULATION_REF_HASH);
     }
 
-    /// @notice Reverts when attempting to record a distribution for a period already recorded
-    function test_RevertWhen_PeriodAlreadyRecorded() public {
+    /// @notice Reverts when attempting to record a batch of a period that was already recorded
+    function test_RevertWhen_BatchAlreadyRecorded() public {
         IDistribution.HolderAmount[] memory holders = singleHolderAmount(investorA, 100);
 
         vm.startPrank(operator);
         distribution.recordDistribution(issuerContract, PERIOD_W32, holders, 100, CALCULATION_REF_HASH);
 
-        vm.expectRevert(abi.encodeWithSelector(Distribution.PeriodAlreadyRecorded.selector, issuerContract, PERIOD_W32));
+        vm.expectRevert(
+            abi.encodeWithSelector(Distribution.BatchAlreadyRecorded.selector, issuerContract, PERIOD_W32, 0)
+        );
         distribution.recordDistribution(issuerContract, PERIOD_W32, holders, 100, CALCULATION_REF_HASH);
         vm.stopPrank();
+    }
+
+    /// @notice Batches of the same period accumulate into one record and pay every holder exactly once
+    function test_RecordDistributionBatchAccumulatesAcrossBatches() public {
+        vm.startPrank(operator);
+        distribution.recordDistributionBatch(
+            issuerContract, PERIOD_W32, singleHolderAmount(investorA, 100), 100, CALCULATION_REF_HASH, 0
+        );
+        distribution.recordDistributionBatch(
+            issuerContract, PERIOD_W32, singleHolderAmount(investorB, 250), 250, CALCULATION_REF_HASH, 1
+        );
+        vm.stopPrank();
+
+        IDistribution.DistributionRecord memory record = distribution.getDistributionRecord(issuerContract, PERIOD_W32);
+
+        assertEq(record.totalAmount, 350);
+        assertEq(paymentToken.balanceOf(investorA), 100);
+        assertEq(paymentToken.balanceOf(investorB), 250);
+        assertEq(distribution.totalDistributedByIssuer(issuerContract), 350);
+        // The period is listed once, no matter how many batches contributed to it
+        assertEq(distribution.getRecordedPeriodCount(issuerContract), 1);
+    }
+
+    /// @notice Re-sending an already-recorded batch reverts instead of paying its holders twice
+    function test_RevertWhen_ReplayingRecordedBatch() public {
+        IDistribution.HolderAmount[] memory holders = singleHolderAmount(investorA, 100);
+
+        vm.startPrank(operator);
+        distribution.recordDistributionBatch(issuerContract, PERIOD_W32, holders, 100, CALCULATION_REF_HASH, 1);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(Distribution.BatchAlreadyRecorded.selector, issuerContract, PERIOD_W32, 1)
+        );
+        distribution.recordDistributionBatch(issuerContract, PERIOD_W32, holders, 100, CALCULATION_REF_HASH, 1);
+        vm.stopPrank();
+
+        assertEq(paymentToken.balanceOf(investorA), 100);
+    }
+
+    /// @notice Reverts when a later batch cites a different off-chain calculation than the first
+    function test_RevertWhen_BatchCitesDifferentCalculationRef() public {
+        bytes32 otherHash = keccak256("other-calculation");
+        IDistribution.HolderAmount[] memory holders = singleHolderAmount(investorA, 100);
+
+        vm.startPrank(operator);
+        distribution.recordDistributionBatch(issuerContract, PERIOD_W32, holders, 100, CALCULATION_REF_HASH, 0);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(Distribution.CalculationRefMismatch.selector, CALCULATION_REF_HASH, otherHash)
+        );
+        distribution.recordDistributionBatch(issuerContract, PERIOD_W32, holders, 100, otherHash, 1);
+        vm.stopPrank();
+    }
+
+    /// @notice Recorded batches are individually queryable
+    function test_IsBatchRecorded() public {
+        vm.prank(operator);
+        distribution.recordDistributionBatch(
+            issuerContract, PERIOD_W32, singleHolderAmount(investorA, 100), 100, CALCULATION_REF_HASH, 2
+        );
+
+        assertTrue(distribution.isBatchRecorded(issuerContract, PERIOD_W32, 2));
+        assertFalse(distribution.isBatchRecorded(issuerContract, PERIOD_W32, 0));
+    }
+
+    /// @notice An admin can rescue tokens stranded in the contract
+    function test_AdminRescuesTokens() public {
+        address treasury = makeAddr("treasury");
+
+        vm.prank(admin);
+        distribution.rescueTokens(address(paymentToken), treasury, 1000);
+
+        assertEq(paymentToken.balanceOf(treasury), 1000);
+        assertEq(paymentToken.balanceOf(address(distribution)), PAYMENT_TOKEN_FUNDING - 1000);
+    }
+
+    /// @notice Reverts when a non-admin attempts to rescue tokens
+    function test_RevertWhen_NonAdminRescuesTokens() public {
+        bytes32 adminRole = distribution.ADMIN_ROLE();
+
+        vm.prank(operator);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, operator, adminRole)
+        );
+        distribution.rescueTokens(address(paymentToken), operator, 1000);
+    }
+
+    /// @notice Investor distributions can be read one page at a time
+    function test_GetInvestorDistributionsPaged() public {
+        IDistribution.HolderAmount[] memory holders = singleHolderAmount(investorA, 100);
+
+        vm.startPrank(operator);
+        distribution.recordDistribution(issuerContract, PERIOD_W31, holders, 100, CALCULATION_REF_HASH);
+        distribution.recordDistribution(issuerContract, PERIOD_W32, holders, 100, CALCULATION_REF_HASH);
+        distribution.recordDistribution(issuerContract, PERIOD_W33, holders, 100, CALCULATION_REF_HASH);
+        vm.stopPrank();
+
+        assertEq(distribution.getInvestorDistributionCount(investorA), 3);
+
+        IDistribution.InvestorDistribution[] memory page = distribution.getInvestorDistributionsPaged(investorA, 1, 2);
+
+        assertEq(page.length, 2);
+        assertEq(page[0].period, PERIOD_W32);
+        assertEq(page[1].period, PERIOD_W33);
+
+        // An offset past the end returns empty rather than reverting
+        assertEq(distribution.getInvestorDistributionsPaged(investorA, 99, 2).length, 0);
+    }
+
+    /// @notice Recorded periods can be read one page at a time
+    function test_GetRecordedPeriodsPaged() public {
+        IDistribution.HolderAmount[] memory holders = singleHolderAmount(investorA, 100);
+
+        vm.startPrank(operator);
+        distribution.recordDistribution(issuerContract, PERIOD_W31, holders, 100, CALCULATION_REF_HASH);
+        distribution.recordDistribution(issuerContract, PERIOD_W32, holders, 100, CALCULATION_REF_HASH);
+        vm.stopPrank();
+
+        assertEq(distribution.getRecordedPeriodCount(issuerContract), 2);
+
+        string[] memory page = distribution.getRecordedPeriodsPaged(issuerContract, 0, 1);
+        assertEq(page.length, 1);
+        assertEq(page[0], PERIOD_W31);
+    }
+
+    /// @notice Reverts when a paginated query is given a zero limit
+    function test_RevertWhen_PagedLimitIsZero() public {
+        vm.expectRevert(abi.encodeWithSelector(Distribution.InvalidPagination.selector, 0, 0));
+        distribution.getInvestorDistributionsPaged(investorA, 0, 0);
     }
 
     /// @notice Reverts when the contract's token balance is insufficient to cover the distribution
@@ -157,6 +290,32 @@ contract DistributionTest is Test, DeployHelpers {
         vm.prank(operator);
         vm.expectRevert(Distribution.EmptyPeriod.selector);
         distribution.recordDistribution(issuerContract, "", holders, 100, CALCULATION_REF_HASH);
+    }
+
+    /// @notice Reverts when a period identifier does not match the width of the issuer's existing periods
+    function test_RevertWhen_PeriodLengthDiffersFromFirstRecorded() public {
+        IDistribution.HolderAmount[] memory holders = singleHolderAmount(investorA, 100);
+
+        vm.startPrank(operator);
+        distribution.recordDistribution(issuerContract, PERIOD_W32, holders, 100, CALCULATION_REF_HASH);
+
+        // "2026-W5" would sort after "2026-W32" under the lexicographic comparison used for range queries
+        vm.expectRevert(abi.encodeWithSelector(Distribution.PeriodLengthMismatch.selector, 8, 7));
+        distribution.recordDistribution(issuerContract, "2026-W5", holders, 100, CALCULATION_REF_HASH);
+        vm.stopPrank();
+    }
+
+    /// @notice Period width is tracked per issuer, so a different issuer may use a different format
+    function test_PeriodLengthIsTrackedPerIssuer() public {
+        address otherIssuer = makeAddr("otherIssuer");
+        IDistribution.HolderAmount[] memory holders = singleHolderAmount(investorA, 100);
+
+        vm.startPrank(operator);
+        distribution.recordDistribution(issuerContract, PERIOD_W32, holders, 100, CALCULATION_REF_HASH);
+        distribution.recordDistribution(otherIssuer, "2026-M07", holders, 100, CALCULATION_REF_HASH);
+        vm.stopPrank();
+
+        assertTrue(distribution.getDistributionRecord(otherIssuer, "2026-M07").recorded);
     }
 
     /// @notice Distribution history is correctly filtered by the given period range

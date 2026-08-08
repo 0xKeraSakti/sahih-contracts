@@ -7,7 +7,7 @@ import { ISchemaRegistry } from "../src/interfaces/ISchemaRegistry.sol";
 
 contract RegisterSchema is Script {
     string public constant VERIFICATION_SCHEMA =
-        "string issuerId,string period,uint256 avgRevenue,uint256 volatilityIndex,bytes32 dataRefHash,uint256 timestamp";
+        "string issuerId,string period,uint256 avgRevenue,uint8 volatilityIndex,bytes32 dataRefHash,uint256 timestamp";
     string public constant SCORE_SCHEMA =
         "string issuerId,uint256 score,string scoringMethodVersion,string period,uint256 timestamp";
     string public constant DISTRIBUTION_SCHEMA =

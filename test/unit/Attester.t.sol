@@ -44,6 +44,32 @@ contract AttesterTest is Test, DeployHelpers {
         assertEq(attesterAddress, address(attester));
     }
 
+    /// @notice Each attestation kind is indexed under its issuer and period, independently of the others
+    function test_AttestationUIDIsIndexedByIssuerAndPeriod() public {
+        vm.startPrank(operator);
+        bytes32 verificationUID = attester.attestVerification(_verificationPayload());
+        bytes32 scoreUID = attester.attestScore(_scorePayload());
+        vm.stopPrank();
+
+        assertEq(
+            attester.getAttestationUID(IAttester.AttestationKind.Verification, ISSUER_ID, PERIOD_W31), verificationUID
+        );
+        assertEq(attester.getAttestationUID(IAttester.AttestationKind.Score, ISSUER_ID, PERIOD_W31), scoreUID);
+        // Nothing was attested for this kind or period, so the index stays empty
+        assertEq(attester.getAttestationUID(IAttester.AttestationKind.Distribution, ISSUER_ID, PERIOD_W31), bytes32(0));
+        assertEq(attester.getAttestationUID(IAttester.AttestationKind.Verification, ISSUER_ID, PERIOD_W32), bytes32(0));
+    }
+
+    /// @notice Re-attesting the same issuer and period leaves the index pointing at the newer UID
+    function test_AttestationIndexKeepsLatestUID() public {
+        vm.startPrank(operator);
+        attester.attestVerification(_verificationPayload());
+        bytes32 secondUID = attester.attestVerification(_verificationPayload());
+        vm.stopPrank();
+
+        assertEq(attester.getAttestationUID(IAttester.AttestationKind.Verification, ISSUER_ID, PERIOD_W31), secondUID);
+    }
+
     /// @notice A score attestation can be decoded back to the original payload
     function test_AttestScoreStoresDecodablePayload() public {
         vm.prank(operator);

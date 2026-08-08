@@ -95,6 +95,26 @@ contract FactoryTest is Test, DeployHelpers {
         factory.createIssuerToken(params);
     }
 
+    /// @notice Reverts when the token name is an empty string
+    function test_RevertWhen_TokenNameIsEmpty() public {
+        Factory.CreateIssuerTokenParams memory params = defaultFactoryParams();
+        params.tokenName = "";
+
+        vm.prank(operator);
+        vm.expectRevert(Factory.EmptyTokenName.selector);
+        factory.createIssuerToken(params);
+    }
+
+    /// @notice Reverts when the token symbol is an empty string
+    function test_RevertWhen_TokenSymbolIsEmpty() public {
+        Factory.CreateIssuerTokenParams memory params = defaultFactoryParams();
+        params.tokenSymbol = "";
+
+        vm.prank(operator);
+        vm.expectRevert(Factory.EmptyTokenSymbol.selector);
+        factory.createIssuerToken(params);
+    }
+
     /// @notice Fetching an issuer contract returns its stored address, deployment time, and active status
     function test_GetIssuerContractReturnsMetadata() public {
         vm.prank(operator);
@@ -164,15 +184,63 @@ contract FactoryTest is Test, DeployHelpers {
         factory.setTokenImplementation(newImplementation);
     }
 
-    /// @notice An admin can deactivate a registered issuer
+    /// @notice An admin can deactivate a registered issuer, and the status reaches the deployed token
     function test_AdminUpdatesIssuerStatus() public {
         vm.prank(operator);
-        factory.createIssuerToken(defaultFactoryParams());
+        (address contractAddress,) = factory.createIssuerToken(defaultFactoryParams());
 
         vm.prank(admin);
         factory.setIssuerStatus(ISSUER_ID, false);
 
         (,, bool active) = factory.getIssuerContract(ISSUER_ID);
         assertFalse(active);
+        assertFalse(IssuerToken(contractAddress).active());
+    }
+
+    /// @notice A deployed contract address resolves back to its issuer metadata
+    function test_GetIssuerMetaResolvesAddressToIssuerId() public {
+        vm.prank(operator);
+        (address contractAddress,) = factory.createIssuerToken(defaultFactoryParams());
+
+        Factory.IssuerMeta memory meta = factory.getIssuerMeta(contractAddress);
+
+        assertEq(meta.issuerId, ISSUER_ID);
+        assertEq(meta.deployedAt, block.timestamp);
+        assertTrue(meta.active);
+    }
+
+    /// @notice Reverts when resolving an address that was never deployed by this factory
+    function test_RevertWhen_IssuerContractNotFound() public {
+        address stranger = makeAddr("stranger");
+
+        vm.expectRevert(abi.encodeWithSelector(Factory.IssuerContractNotFound.selector, stranger));
+        factory.getIssuerMeta(stranger);
+    }
+
+    /// @notice The issuer's own wallet address is carried through to the deployed token
+    function test_IssuerWalletPropagatesToDeployedToken() public {
+        vm.prank(operator);
+        (address contractAddress,) = factory.createIssuerToken(defaultFactoryParams());
+
+        assertEq(IssuerToken(contractAddress).issuerWallet(), ISSUER_WALLET);
+    }
+
+    /// @notice Reverts when creating an issuer token without an issuer wallet address
+    function test_RevertWhen_IssuerWalletIsZero() public {
+        Factory.CreateIssuerTokenParams memory params = defaultFactoryParams();
+        params.issuerWallet = address(0);
+
+        vm.prank(operator);
+        vm.expectRevert(Factory.ZeroAddress.selector);
+        factory.createIssuerToken(params);
+    }
+
+    /// @notice The Factory holds the role that lets it propagate status changes to the tokens it deploys
+    function test_FactoryHoldsFactoryRoleOnDeployedToken() public {
+        vm.prank(operator);
+        (address contractAddress,) = factory.createIssuerToken(defaultFactoryParams());
+
+        IssuerToken token = IssuerToken(contractAddress);
+        assertTrue(token.hasRole(token.FACTORY_ROLE(), address(factory)));
     }
 }

@@ -22,6 +22,7 @@ contract Factory is AccessControl {
         uint256 profitSharingRatio;
         string distributionPeriod;
         bool transferRestricted;
+        address issuerWallet;
     }
 
     /// @notice Metadata tracked for a deployed issuer contract
@@ -58,10 +59,14 @@ contract Factory is AccessControl {
     address public tokenOperator;
 
     /// @notice Emitted when a new issuer token is deployed
-    /// @param issuerId Issuer ID the token was registered under
+    /// @dev `issuerId` is emitted unindexed so indexers can read the raw string; filter on `issuerIdHash`
+    /// @param issuerIdHash keccak256 hash of the issuer ID, for log filtering
     /// @param contractAddress Address of the deployed issuer token proxy
+    /// @param issuerId Issuer ID the token was registered under
     /// @param timestamp Timestamp the issuer token was deployed
-    event IssuerTokenCreated(string indexed issuerId, address indexed contractAddress, uint256 indexed timestamp);
+    event IssuerTokenCreated(
+        bytes32 indexed issuerIdHash, address indexed contractAddress, string issuerId, uint256 timestamp
+    );
     /// @notice Emitted when the token implementation address is updated
     /// @param tokenImplementation New implementation address
     event TokenImplementationUpdated(address indexed tokenImplementation);
@@ -70,15 +75,22 @@ contract Factory is AccessControl {
     /// @param tokenOperator New token operator address
     event TokenRolesUpdated(address indexed tokenAdmin, address indexed tokenOperator);
     /// @notice Emitted when an issuer's active status is updated
-    /// @param issuerId Issuer ID that was updated
+    /// @dev `issuerId` is emitted unindexed so indexers can read the raw string; filter on `issuerIdHash`
+    /// @param issuerIdHash keccak256 hash of the issuer ID, for log filtering
     /// @param contractAddress Deployed issuer token proxy address
+    /// @param issuerId Issuer ID that was updated
     /// @param active New active status
-    event IssuerStatusUpdated(string indexed issuerId, address indexed contractAddress, bool indexed active);
+    event IssuerStatusUpdated(
+        bytes32 indexed issuerIdHash, address indexed contractAddress, string issuerId, bool active
+    );
 
     error ZeroAddress();
     error EmptyIssuerId();
+    error EmptyTokenName();
+    error EmptyTokenSymbol();
     error IssuerAlreadyRegistered(string issuerId);
     error IssuerNotFound(string issuerId);
+    error IssuerContractNotFound(address contractAddress);
     error InvalidProfitSharingRatio(uint256 ratio);
     error InvalidTotalSupply();
     error InvalidPricePerUnit();
@@ -124,7 +136,7 @@ contract Factory is AccessControl {
         issuerMeta[contractAddress] = IssuerMeta({ issuerId: params.issuerId, deployedAt: deployedAt, active: true });
         allIssuerContracts.push(contractAddress);
 
-        emit IssuerTokenCreated(params.issuerId, contractAddress, deployedAt);
+        emit IssuerTokenCreated(keccak256(bytes(params.issuerId)), contractAddress, params.issuerId, deployedAt);
     }
 
     /// @notice Updates the implementation address used for new issuer token proxies
@@ -157,6 +169,7 @@ contract Factory is AccessControl {
     }
 
     /// @notice Updates whether an issuer is active
+    /// @dev Propagates the status to the issuer token itself, where it gates `purchaseTokens`
     /// @param issuerId Issuer ID to update
     /// @param active New active status
     function setIssuerStatus(
@@ -168,8 +181,9 @@ contract Factory is AccessControl {
             revert IssuerNotFound(issuerId);
         }
         issuerMeta[contractAddress].active = active;
+        IIssuerToken(contractAddress).setActive(active);
 
-        emit IssuerStatusUpdated(issuerId, contractAddress, active);
+        emit IssuerStatusUpdated(keccak256(bytes(issuerId)), contractAddress, issuerId, active);
     }
 
     /// @notice Fetches deployment info for an issuer
@@ -188,6 +202,21 @@ contract Factory is AccessControl {
         IssuerMeta memory meta = issuerMeta[contractAddress];
         deployedAt = meta.deployedAt;
         active = meta.active;
+    }
+
+    /// @notice Fetches the metadata stored for a deployed issuer contract
+    /// @dev Reverse lookup of `getIssuerContract`: distributions are recorded against a contract
+    /// address while attestations are keyed by issuer ID, so callers need to resolve one to the other
+    /// @param contractAddress Deployed issuer token proxy address to query
+    /// @return The metadata registered for that contract
+    function getIssuerMeta(
+        address contractAddress
+    ) external view returns (IssuerMeta memory) {
+        IssuerMeta memory meta = issuerMeta[contractAddress];
+        if (meta.deployedAt == 0) {
+            revert IssuerContractNotFound(contractAddress);
+        }
+        return meta;
     }
 
     /// @notice Lists deployed issuers with pagination
@@ -244,7 +273,9 @@ contract Factory is AccessControl {
             distributionPeriod: params.distributionPeriod,
             transferRestricted: params.transferRestricted,
             admin: tokenAdmin,
-            operator: tokenOperator
+            operator: tokenOperator,
+            factory: address(this),
+            issuerWallet: params.issuerWallet
         });
 
         bytes memory initData = abi.encodeCall(IIssuerToken.initialize, (initParams));
@@ -259,8 +290,17 @@ contract Factory is AccessControl {
         if (params.issuerId.isEmpty()) {
             revert EmptyIssuerId();
         }
+        if (params.tokenName.isEmpty()) {
+            revert EmptyTokenName();
+        }
+        if (params.tokenSymbol.isEmpty()) {
+            revert EmptyTokenSymbol();
+        }
         if (issuerContracts[params.issuerId] != address(0)) {
             revert IssuerAlreadyRegistered(params.issuerId);
+        }
+        if (params.issuerWallet == address(0)) {
+            revert ZeroAddress();
         }
         if (params.totalSupply == 0) {
             revert InvalidTotalSupply();

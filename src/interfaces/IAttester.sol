@@ -7,12 +7,21 @@ import { EASAttestation } from "./IEAS.sol";
 /// @author Sahih Contracts
 /// @notice Interface for recording verification, score, and distribution attestations via EAS
 interface IAttester {
+    /// @notice The kind of attestation an index entry refers to
+    enum AttestationKind {
+        Verification,
+        Score,
+        Distribution
+    }
+
     /// @notice Payload attested for an issuer's periodic verification data
+    /// @dev `volatilityIndex` is a whole number on a 0-100 scale, computed off-chain; it carries no
+    /// fixed-point scaling, so a raw index of 0.12 is submitted as 12
     struct VerificationPayload {
         string issuerId;
         string period;
         uint256 avgRevenue;
-        uint256 volatilityIndex;
+        uint8 volatilityIndex;
         bytes32 dataRefHash;
         uint256 timestamp;
     }
@@ -36,20 +45,29 @@ interface IAttester {
     }
 
     /// @notice Emitted when a verification attestation is recorded
+    /// @dev `issuerId` and `period` are emitted unindexed so indexers can read the raw strings, which is
+    /// the only on-chain route back from an attestation to the issuer it belongs to; filter on `issuerIdHash`
+    /// @param issuerIdHash keccak256 hash of the issuer ID, for log filtering
+    /// @param attestationUID UID of the created attestation
     /// @param issuerId Issuer the attestation is for
     /// @param period Period identifier the attestation covers
-    /// @param attestationUID UID of the created attestation
-    event VerificationAttested(string indexed issuerId, string indexed period, bytes32 attestationUID);
+    event VerificationAttested(
+        bytes32 indexed issuerIdHash, bytes32 indexed attestationUID, string issuerId, string period
+    );
     /// @notice Emitted when a score attestation is recorded
+    /// @param issuerIdHash keccak256 hash of the issuer ID, for log filtering
+    /// @param attestationUID UID of the created attestation
     /// @param issuerId Issuer the attestation is for
     /// @param period Period identifier the attestation covers
-    /// @param attestationUID UID of the created attestation
-    event ScoreAttested(string indexed issuerId, string indexed period, bytes32 attestationUID);
+    event ScoreAttested(bytes32 indexed issuerIdHash, bytes32 indexed attestationUID, string issuerId, string period);
     /// @notice Emitted when a distribution attestation is recorded
+    /// @param issuerIdHash keccak256 hash of the issuer ID, for log filtering
+    /// @param attestationUID UID of the created attestation
     /// @param issuerId Issuer the attestation is for
     /// @param period Period identifier the attestation covers
-    /// @param attestationUID UID of the created attestation
-    event DistributionAttested(string indexed issuerId, string indexed period, bytes32 attestationUID);
+    event DistributionAttested(
+        bytes32 indexed issuerIdHash, bytes32 indexed attestationUID, string issuerId, string period
+    );
     /// @notice Emitted when the verification, score, and distribution schema UIDs are updated
     /// @param verificationSchema New schema UID for verification attestations
     /// @param scoreSchema New schema UID for score attestations
@@ -113,6 +131,19 @@ interface IAttester {
     function setEAS(
         address eas_
     ) external;
+
+    /// @notice Looks up the most recent attestation UID for an issuer, period, and kind
+    /// @dev Attestations are immutable, but nothing stops the same issuer/period being attested twice;
+    /// this returns the latest. Returns zero when nothing has been attested for that combination
+    /// @param kind Which of the three attestation kinds to look up
+    /// @param issuerId Issuer the attestation belongs to
+    /// @param period Period identifier the attestation covers
+    /// @return UID of the latest matching attestation, or zero if none exists
+    function getAttestationUID(
+        AttestationKind kind,
+        string calldata issuerId,
+        string calldata period
+    ) external view returns (bytes32);
 
     /// @notice Fetches a raw attestation by UID, reverting if it doesn't exist
     /// @param attestationUID UID of the attestation to fetch

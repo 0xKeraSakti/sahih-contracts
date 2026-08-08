@@ -128,7 +128,9 @@ abstract contract DeployHelpers is TestConstants {
             distributionPeriod: DISTRIBUTION_PERIOD,
             transferRestricted: true,
             admin: admin,
-            operator: operator
+            operator: operator,
+            factory: address(0),
+            issuerWallet: ISSUER_WALLET
         });
     }
 
@@ -143,7 +145,8 @@ abstract contract DeployHelpers is TestConstants {
             pricePerUnit: PRICE_PER_UNIT,
             profitSharingRatio: PROFIT_SHARING_RATIO,
             distributionPeriod: DISTRIBUTION_PERIOD,
-            transferRestricted: true
+            transferRestricted: true,
+            issuerWallet: ISSUER_WALLET
         });
     }
 

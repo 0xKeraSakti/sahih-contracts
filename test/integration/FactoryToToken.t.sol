@@ -31,7 +31,8 @@ contract FactoryToTokenTest is Test, DeployHelpers {
         IIssuerToken token = IIssuerToken(contractAddress);
         IIssuerToken.IssuerTerms memory terms = token.getIssuerTerms();
 
-        assertEq(terms.totalSupply, MAX_SUPPLY);
+        assertEq(terms.maxSupply, MAX_SUPPLY);
+        assertEq(terms.circulatingSupply, 0);
         assertEq(terms.pricePerUnit, PRICE_PER_UNIT);
         assertEq(terms.profitSharingRatio, PROFIT_SHARING_RATIO);
         assertEq(token.remainingSupply(), MAX_SUPPLY);
@@ -73,6 +74,24 @@ contract FactoryToTokenTest is Test, DeployHelpers {
         IssuerToken token = IssuerToken(contractAddress);
         assertTrue(token.hasRole(token.OPERATOR_ROLE(), newOperator));
         assertFalse(token.hasRole(token.OPERATOR_ROLE(), operator));
+    }
+
+    /// @notice Deactivating an issuer through the Factory blocks purchases on its deployed token
+    function test_DeactivatingIssuerThroughFactoryBlocksPurchases() public {
+        vm.prank(operator);
+        (address contractAddress,) = factory.createIssuerToken(defaultFactoryParams());
+
+        IssuerToken token = IssuerToken(contractAddress);
+        assertTrue(token.active());
+
+        vm.prank(admin);
+        factory.setIssuerStatus(ISSUER_ID, false);
+
+        assertFalse(token.active());
+
+        vm.prank(investorA);
+        vm.expectRevert(IssuerToken.IssuerInactive.selector);
+        token.purchaseTokens(investorA, 100, "qris");
     }
 
     /// @notice Each issuer deployed by the Factory has fully isolated token state

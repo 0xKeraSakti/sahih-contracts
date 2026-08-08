@@ -17,6 +17,8 @@ contract IssuerToken is IIssuerToken, ERC20Upgradeable, AccessControlUpgradeable
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
     /// @notice Role allowed to purchase tokens on behalf of an investor
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
+    /// @notice Role held by the deploying factory, allowed to update the active status
+    bytes32 public constant FACTORY_ROLE = keccak256("FACTORY_ROLE");
     /// @notice Maximum allowed profit sharing ratio, in basis points
     uint256 public constant MAX_PROFIT_SHARING_RATIO = 10_000;
 
@@ -34,19 +36,30 @@ contract IssuerToken is IIssuerToken, ERC20Upgradeable, AccessControlUpgradeable
     mapping(address => bool) public transferWhitelist;
     /// @notice Maximum total supply that can be minted
     uint256 public maxSupply;
+    /// @notice Whether the issuer is active and may sell new tokens
+    bool public active;
+    /// @notice Whether purchases are temporarily paused, independent of the active status
+    bool public purchasePaused;
+    /// @notice The issuer's own wallet address, used for off-chain settlement and identification
+    address public issuerWallet;
 
-    uint256[50] private __gap;
+    uint256[48] private __gap;
 
     error ZeroAddress();
     error ZeroAmount();
     error EmptyIssuerId();
+    error EmptyTokenName();
+    error EmptyTokenSymbol();
     error EmptyDistributionPeriod();
     error InvalidMaxSupply();
     error InvalidPricePerUnit();
     error InvalidProfitSharingRatio(uint256 ratio);
     error UnauthorizedPurchaser(address caller, address investorAddress);
+    error UnauthorizedStatusUpdate(address caller);
     error SupplyExceeded(uint256 requested, uint256 remaining);
     error TransferRestricted();
+    error IssuerInactive();
+    error PurchasePaused();
 
     /// @notice Disables initializers on the implementation contract
     constructor() {
@@ -61,10 +74,16 @@ contract IssuerToken is IIssuerToken, ERC20Upgradeable, AccessControlUpgradeable
         if (params.issuerId.isEmpty()) {
             revert EmptyIssuerId();
         }
+        if (params.tokenName.isEmpty()) {
+            revert EmptyTokenName();
+        }
+        if (params.tokenSymbol.isEmpty()) {
+            revert EmptyTokenSymbol();
+        }
         if (params.distributionPeriod.isEmpty()) {
             revert EmptyDistributionPeriod();
         }
-        if (params.admin == address(0) || params.operator == address(0)) {
+        if (params.admin == address(0) || params.operator == address(0) || params.issuerWallet == address(0)) {
             revert ZeroAddress();
         }
         if (params.maxSupply == 0) {
@@ -83,9 +102,15 @@ contract IssuerToken is IIssuerToken, ERC20Upgradeable, AccessControlUpgradeable
 
         _setRoleAdmin(ADMIN_ROLE, ADMIN_ROLE);
         _setRoleAdmin(OPERATOR_ROLE, ADMIN_ROLE);
+        _setRoleAdmin(FACTORY_ROLE, ADMIN_ROLE);
         _grantRole(DEFAULT_ADMIN_ROLE, params.admin);
         _grantRole(ADMIN_ROLE, params.admin);
         _grantRole(OPERATOR_ROLE, params.operator);
+        // A token deployed standalone (outside the factory) has no factory to grant the role to;
+        // the admin path in setActive covers status updates in that case
+        if (params.factory != address(0)) {
+            _grantRole(FACTORY_ROLE, params.factory);
+        }
 
         issuerId = params.issuerId;
         maxSupply = params.maxSupply;
@@ -93,6 +118,8 @@ contract IssuerToken is IIssuerToken, ERC20Upgradeable, AccessControlUpgradeable
         profitSharingRatio = params.profitSharingRatio;
         distributionPeriod = params.distributionPeriod;
         transferRestricted = params.transferRestricted;
+        issuerWallet = params.issuerWallet;
+        active = true;
     }
 
     /// @notice Mints tokens to an investor in exchange for an off-chain payment
@@ -104,6 +131,12 @@ contract IssuerToken is IIssuerToken, ERC20Upgradeable, AccessControlUpgradeable
         uint256 amount,
         string calldata paymentSource
     ) external {
+        if (!active) {
+            revert IssuerInactive();
+        }
+        if (purchasePaused) {
+            revert PurchasePaused();
+        }
         if (investorAddress == address(0)) {
             revert ZeroAddress();
         }
@@ -149,15 +182,74 @@ contract IssuerToken is IIssuerToken, ERC20Upgradeable, AccessControlUpgradeable
         emit TransferRestrictionUpdated(restricted);
     }
 
+    /// @notice Updates whether the issuer is active and may sell new tokens
+    /// @dev Callable by the deploying factory (via `Factory.setIssuerStatus`) or directly by an admin
+    /// @param active_ New active status
+    function setActive(
+        bool active_
+    ) external {
+        if (!hasRole(FACTORY_ROLE, msg.sender) && !hasRole(ADMIN_ROLE, msg.sender)) {
+            revert UnauthorizedStatusUpdate(msg.sender);
+        }
+        active = active_;
+
+        emit ActiveStatusUpdated(active_);
+    }
+
+    /// @notice Pauses or resumes purchases without changing the issuer's active status
+    /// @dev Held by the operator so the backend can freeze minting while it snapshots holder balances
+    /// for a distribution, without having to deactivate the issuer entirely
+    /// @param paused New purchase pause state
+    function setPurchasePaused(
+        bool paused
+    ) external onlyRole(OPERATOR_ROLE) {
+        purchasePaused = paused;
+
+        emit PurchasePausedUpdated(paused);
+    }
+
+    /// @notice Updates the issuer's own payout wallet address
+    /// @param issuerWallet_ New issuer wallet address
+    function setIssuerWallet(
+        address issuerWallet_
+    ) external onlyRole(ADMIN_ROLE) {
+        if (issuerWallet_ == address(0)) {
+            revert ZeroAddress();
+        }
+        issuerWallet = issuerWallet_;
+
+        emit IssuerWalletUpdated(issuerWallet_);
+    }
+
+    /// @notice Reads several holder balances and the circulating supply in a single call
+    /// @dev Every value is read within one call, so the whole set is guaranteed to come from the same
+    /// block. This is what makes a distribution snapshot internally consistent without an archive node
+    /// @param accounts Holder addresses to read balances for
+    /// @return balances Balance of each account, in the order given
+    /// @return circulatingSupply Total supply minted so far
+    function balancesAt(
+        address[] calldata accounts
+    ) external view returns (uint256[] memory balances, uint256 circulatingSupply) {
+        balances = new uint256[](accounts.length);
+        for (uint256 i = 0; i < accounts.length; ++i) {
+            balances[i] = balanceOf(accounts[i]);
+        }
+        circulatingSupply = totalSupply();
+    }
+
     /// @notice Returns the current issuer terms
-    /// @return Current profit sharing ratio, supply, price, distribution period, and transfer restriction
+    /// @dev `maxSupply` is the mintable cap; `circulatingSupply` is what has actually been minted so far.
+    /// Use `circulatingSupply` when calculating each holder's proportional share of a distribution
+    /// @return Current profit sharing ratio, supply figures, price, distribution period, and status flags
     function getIssuerTerms() external view returns (IssuerTerms memory) {
         return IssuerTerms({
             profitSharingRatio: profitSharingRatio,
-            totalSupply: maxSupply,
+            maxSupply: maxSupply,
+            circulatingSupply: totalSupply(),
             pricePerUnit: pricePerUnit,
             distributionPeriod: distributionPeriod,
-            transferRestricted: transferRestricted
+            transferRestricted: transferRestricted,
+            active: active
         });
     }
 
@@ -165,6 +257,28 @@ contract IssuerToken is IIssuerToken, ERC20Upgradeable, AccessControlUpgradeable
     /// @return Remaining mintable supply
     function remainingSupply() external view returns (uint256) {
         return maxSupply - totalSupply();
+    }
+
+    /// @notice Quotes how many whole units a payment buys at the current unit price
+    /// @dev Units are indivisible, so the quote rounds down and reports the shortfall as `change`.
+    /// This is a pure quote: it neither reserves supply nor verifies that payment was received
+    /// @param paidAmount Amount paid, in the same currency unit as `pricePerUnit`
+    /// @return units Whole units the payment covers, rounded down
+    /// @return change Remainder of `paidAmount` that does not cover a further whole unit
+    function quotePurchase(
+        uint256 paidAmount
+    ) external view returns (uint256 units, uint256 change) {
+        // pricePerUnit is validated non-zero at initialization, so this cannot divide by zero
+        units = paidAmount / pricePerUnit;
+        change = paidAmount - (units * pricePerUnit);
+    }
+
+    /// @notice Returns the number of decimals the token uses
+    /// @dev Sukuk units are indivisible, so this overrides the ERC20 default of 18. Balances,
+    /// `maxSupply`, and `pricePerUnit` are therefore all expressed in whole units
+    /// @return Always zero
+    function decimals() public pure override returns (uint8) {
+        return 0;
     }
 
     /// @notice Enforces the transfer whitelist when transfers are restricted

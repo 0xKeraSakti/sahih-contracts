@@ -15,6 +15,8 @@ abstract contract TestConstants {
     string internal constant TOKEN_SYMBOL = "SHUMKM1";
     /// @notice Default distribution period label
     string internal constant DISTRIBUTION_PERIOD = "weekly";
+    /// @notice Default issuer-owned wallet address used in fixtures
+    address internal constant ISSUER_WALLET = address(0xDECAF);
 
     /// @notice Sample period identifier: week 31
     string internal constant PERIOD_W31 = "2026-W31";
@@ -32,8 +34,8 @@ abstract contract TestConstants {
 
     /// @notice Default average revenue used in verification attestations
     uint256 internal constant AVG_REVENUE = 8_500_000;
-    /// @notice Default volatility index used in verification attestations
-    uint256 internal constant VOLATILITY_INDEX = 12;
+    /// @notice Default volatility index used in verification attestations, on a 0-100 scale
+    uint8 internal constant VOLATILITY_INDEX = 12;
     /// @notice Default risk score used in score attestations
     uint256 internal constant RISK_SCORE = 78;
     /// @notice Default scoring method version used in score attestations
